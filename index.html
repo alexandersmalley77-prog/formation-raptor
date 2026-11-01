@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Formation Raptor - Prototype</title>
 <style>
-body { margin:0; background:#000; color:#0f0; font-family:monospace; overflow:hidden; }
-canvas { display:block; position:absolute; top:0; left:0; background:#001122; border:2px solid #0f0; width:100vw; height:100vh; max-width:100vw; max-height:100vh; object-fit:contain; z-index:1; }
+html, body { height:100%; overscroll-behavior:none; }
+body { margin:0; background:#000; color:#0f0; font-family:monospace; overflow:hidden; touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+canvas { display:block; position:absolute; top:0; left:0; background:#001122; border:2px solid #0f0; box-sizing:border-box; touch-action:none; width:100vw; height:100vh; max-width:100vw; max-height:100vh; object-fit:contain; z-index:1; }
 #ui { position:absolute; top:4px; left:4px; color:#0f0; font-size:12px; z-index:100; max-width:50vw; }
 #uiPanel { display:none; }
 button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1px solid #0f0; cursor:pointer; font-size:13px; touch-action:manipulation; position:relative; z-index:101; }
@@ -45,6 +46,7 @@ button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1p
   </div>
   <div style="font-size:18px; margin-bottom:15px;">Formation Raptor</div>
   <button id="enterBtn" onclick="enterGame()" style="font-size:18px; padding:12px 24px;">Enter</button>
+  <button id="landingStartBtn" style="font-size:18px; padding:12px 24px;">&#9654; Start Run</button>
   <button id="dronesBtn" onclick="window.toggleDrones=toggleDrones; toggleDrones();">Drones</button>
 </div>
 <div id="ui">
@@ -52,7 +54,6 @@ button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1p
   <div id="uiPanel">
   Energy: <span id="energy">10</span> | Coins: <span id="coins">0</span> | Wave: <span id="wave">1</span>
   <br><button id="startBtn" onclick="startRun()">Start Run (1 Energy)</button>
-  <button onclick="upgradeDamage()">Upgrade Damage (+10 coins)</button>
   <br><button onclick="toggleMode()">Mode: <span id="mode">Multi-Group</span></button>
   <button onclick="togglePause()">Pause</button>
   <button onclick="toggleUpgrades()">Upgrades</button>
@@ -122,6 +123,9 @@ let enemyBullets = [];
 let lastShot = 0;
 let touchX = null;
 let touchY = null;
+// Relative drag: finger start + ship start; ship moves by finger delta
+let drag = null; // { fx, fy, px, py }
+const DRAG_SENS = 1.2;
 let mode = 'multi';
 let drones = [];
 let fireRate = 100;
@@ -273,8 +277,20 @@ function saveScore() {
   updateHomeScores();
 }
 
+function collapseOptions() {
+  document.getElementById('uiPanel').style.display = 'none';
+  const lb = document.getElementById('leaderboard'); if (lb) lb.style.display = 'none';
+  document.getElementById('controls').style.display = 'none';
+}
+
+function startFromLanding() {
+  enterGame();
+  startRun();
+}
+
 function startRun() {
   if (energy <= 0 || running) return;
+  collapseOptions();
   energy--;
   running = true;
   picking = false;
@@ -499,14 +515,19 @@ function gameLoop(ts) {
     if (keys['ArrowUp'] || keys['w']) player.y -= player.speed;
     if (keys['ArrowDown'] || keys['s']) player.y += player.speed;
     touchX = null; touchY = null;
-  } else if (touchX !== null && touchY !== null) {
-    player.x = touchX - player.w / 2;
-    player.y = touchY - player.h / 2;
+    drag = null;
+  } else if (drag && touchX !== null && touchY !== null) {
+    player.x = drag.px + (touchX - drag.fx) * DRAG_SENS;
+    player.y = drag.py + (touchY - drag.fy) * DRAG_SENS;
   }
   // Rectangle perimeter the player cannot move past (larger for phone)
   const rectX = 30, rectY = canvas.height * 0.32, rectW = 420, rectH = 380;
   player.x = Math.max(rectX, Math.min(rectX + rectW - player.w, player.x));
   player.y = Math.max(rectY, Math.min(rectY + rectH - player.h, player.y));
+  // Re-anchor drag when clamped so reversing direction responds immediately
+  if (drag && touchX !== null) {
+    drag.px = player.x; drag.py = player.y; drag.fx = touchX; drag.fy = touchY;
+  }
 
   // Draw the movement rectangle perimeter
   ctx.strokeStyle = '#0a0';
@@ -709,12 +730,15 @@ function gameLoop(ts) {
   if (boss) {
     ctx.fillStyle = boss.isBig ? '#844' : '#666';
     ctx.fillRect(boss.x, boss.y, boss.w, boss.h);
-    // HP bar on boss
-    ctx.fillStyle = '#300';
-    ctx.fillRect(boss.x, boss.y - 8, boss.w, 6);
-    ctx.fillStyle = boss.isBig ? '#f40' : '#0f0';
+    // Boss HP bar pinned to the top of the canvas (right of the Options button)
     const maxHp = boss.isBig ? (800 + wave * 40) : (280 + wave * 20);
-    ctx.fillRect(boss.x, boss.y - 8, boss.w * (boss.hp / maxHp), 6);
+    ctx.fillStyle = '#300';
+    ctx.fillRect(110, 12, 350, 10);
+    ctx.fillStyle = boss.isBig ? '#f40' : '#0f0';
+    ctx.fillRect(110, 12, 350 * Math.max(0, boss.hp / maxHp), 10);
+    ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.strokeRect(110, 12, 350, 10);
+    ctx.fillStyle = '#0f0'; ctx.font = '10px monospace';
+    ctx.fillText(boss.isBig ? 'BOSS' : 'MINI BOSS', 110, 34);
     boss.turrets.forEach((t) => {
       if (t.active) {
         ctx.fillStyle = '#f80';
@@ -805,55 +829,45 @@ function gameLoop(ts) {
 document.addEventListener('keydown', e => { keys[e.key] = true; });
 document.addEventListener('keyup', e => { keys[e.key] = false; });
 
+// Convert client coords -> canvas coords, accounting for the border and
+// object-fit:contain letterboxing (the drawn image is smaller than the element).
 function getCanvasTouch(e) {
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
+  const boxW = canvas.clientWidth, boxH = canvas.clientHeight;
+  const boxL = rect.left + canvas.clientLeft, boxT = rect.top + canvas.clientTop;
+  const scale = Math.min(boxW / canvas.width, boxH / canvas.height);
+  const drawW = canvas.width * scale, drawH = canvas.height * scale;
+  const offX = (boxW - drawW) / 2, offY = (boxH - drawH) / 2;
   const t = e.touches ? e.touches[0] : e;
-  const clientX = t.clientX;
-  const clientY = t.clientY;
   return {
-    x: (clientX - rect.left) * scaleX,
-    y: (clientY - rect.top) * scaleY
+    x: (t.clientX - boxL - offX) / scale,
+    y: (t.clientY - boxT - offY) / scale
   };
 }
 
-// Better touch support for mobile (Pixel)
-canvas.addEventListener('touchstart', e => {
-  e.preventDefault();
-  if (e.touches.length) {
-    const p = getCanvasTouch(e);
-    touchX = p.x; touchY = p.y;
-  }
-}, { passive: false });
-canvas.addEventListener('touchmove', e => {
-  e.preventDefault();
-  if (e.touches.length) {
-    const p = getCanvasTouch(e);
-    touchX = p.x; touchY = p.y;
-  }
-}, { passive: false });
-canvas.addEventListener('touchend', e => {
-  e.preventDefault();
-  if (!e.touches.length) {
-    touchX = null; touchY = null;
-  }
-}, { passive: false });
-canvas.addEventListener('touchcancel', e => {
-  touchX = null; touchY = null;
-}, { passive: false });
-
-canvas.addEventListener('mousedown', e => {
+function beginDrag(e) {
   const p = getCanvasTouch(e);
   touchX = p.x; touchY = p.y;
-});
-canvas.addEventListener('mousemove', e => {
-  if (e.buttons) {
-    const p = getCanvasTouch(e);
-    touchX = p.x; touchY = p.y;
-  }
-});
-canvas.addEventListener('mouseup', () => { touchX = null; touchY = null; });
+  drag = { fx: p.x, fy: p.y, px: player.x, py: player.y };
+}
+function moveDrag(e) {
+  const p = getCanvasTouch(e);
+  touchX = p.x; touchY = p.y;
+}
+function endDrag() { touchX = null; touchY = null; drag = null; }
+
+// Touch: relative drag (ship moves by finger delta, not snapped under finger)
+canvas.addEventListener('touchstart', e => { e.preventDefault(); if (e.touches.length) beginDrag(e); }, { passive: false });
+canvas.addEventListener('touchmove', e => { e.preventDefault(); if (e.touches.length) moveDrag(e); }, { passive: false });
+canvas.addEventListener('touchend', e => { e.preventDefault(); if (!e.touches.length) endDrag(); else beginDrag(e); }, { passive: false });
+canvas.addEventListener('touchcancel', endDrag, { passive: false });
+// Block page scroll / pinch-zoom / double-tap zoom outside buttons
+document.addEventListener('touchmove', e => { if (e.target === canvas || e.touches.length > 1) e.preventDefault(); }, { passive: false });
+document.addEventListener('gesturestart', e => e.preventDefault());
+
+canvas.addEventListener('mousedown', beginDrag);
+canvas.addEventListener('mousemove', e => { if (e.buttons && drag) moveDrag(e); });
+window.addEventListener('mouseup', endDrag);
 
 updateUI();
 updateHomeScores();
@@ -868,6 +882,11 @@ if (enterBtn) {
   enterBtn.addEventListener('click', enterGame);
   enterBtn.addEventListener('touchend', function(e) { e.preventDefault(); enterGame(); }, { passive: false });
 }
+
+// Landing "Start Run" button
+const landingStartBtn = document.getElementById('landingStartBtn');
+landingStartBtn.addEventListener('click', startFromLanding);
+landingStartBtn.addEventListener('touchend', function(e) { e.preventDefault(); startFromLanding(); }, { passive: false });
 
 requestAnimationFrame(gameLoop);
 
