@@ -361,7 +361,7 @@ function pickPower(i) {
 
 function spawnWave() {
   enemies = [];
-  const countScale = 16 + Math.floor(wave * 4);
+  const countScale = 28 + Math.floor(wave * 6);
   const hpBase = (16 + wave * 5) * enemyHPScale;
 
   if (mode === 'single') {
@@ -470,7 +470,9 @@ function spawnBoss(isBig) {
       turrets: [
         { x: 20, y: 50, hp: 200, active: true },
         { x: 280, y: 50, hp: 200, active: true },
-        { x: 150, y: 30, hp: 250, active: true }
+        { x: 150, y: 30, hp: 250, active: true },
+        { x: 80, y: 70, hp: 150, active: true },
+        { x: 220, y: 70, hp: 150, active: true }
       ]
     };
   } else {
@@ -484,7 +486,8 @@ function spawnBoss(isBig) {
       lastShot: 0,
       turrets: [
         { x: 15, y: 30, hp: 100, active: true },
-        { x: 125, y: 30, hp: 100, active: true }
+        { x: 125, y: 30, hp: 100, active: true },
+        { x: 70, y: 50, hp: 80, active: true }
       ]
     };
   }
