@@ -421,7 +421,7 @@ function spawnWave() {
   // Random mixed adds
   const extras = 6 + Math.floor(wave * 2);
   for (let i = 0; i < extras; i++) {
-    const types = ['normal', 'charger', 'shooter', 'tank', 'laser', 'nuke'];
+    const types = ['normal', 'normal', 'normal', 'normal', 'charger', 'shooter', 'tank', 'laser', 'nuke'];
     const type = types[Math.floor(Math.random() * types.length)];
     enemies.push({
       x: 30 + Math.random() * 420,
