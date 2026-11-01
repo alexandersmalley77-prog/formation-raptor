@@ -835,17 +835,21 @@ function spawnWave() {
 // 2b13f76 "tankier bosses": core HP 800+40w -> 2500+120w and 280+20w -> 900+60w (~3x),
 // turret HP 80/100 -> 200/250 and 40 -> 100 (2.5x). Extra turrets from d398b97 at 0.75x / 0.8x of a side turret.
 const BOSS_CORE_MUL = 3, BOSS_TURRET_MUL = 2.5;
+// Big-boss balance pass (owner-approved): a mid-run build (5 drones, 2 shots, 36 dmg, 90 ms) should win in ~30-50 s.
+// Core 3x -> 2x, big-boss turrets 2.5x -> 1.75x, the two extra mounts at 0.5x of a side turret (was 0.75x) and slower,
+// heavy core shot every 2.5 s (was 0.8 s) at half damage. Mini boss untouched.
+const BIG_CORE_MUL = 2, BIG_TURRET_MUL = 1.75, BIG_MOUNT_MUL = 0.5;
 function spawnBoss(isBig) {
   const tier = Math.floor((wave - 1) / 10);
   const scale = (1 + (wave - 1) * 0.08) * (1 + tier * 0.6) * enemyHPScale;
   if (isBig) {
-    boss = { isBig: true, w: 300, h: 120, targetY: 45, speed: 0.8, coreHp: 9000 * BOSS_CORE_MUL * scale,
-      turrets: [ { rx: 14, size: 34, hp: 1650 * BOSS_TURRET_MUL * scale, kind: 'spread', cdBase: 110 },
-                 { rx: 76, size: 26, hp: 1650 * BOSS_TURRET_MUL * 0.75 * scale, kind: 'aimed', cdBase: 150 },
-                 { rx: 133, size: 34, hp: 1900 * BOSS_TURRET_MUL * scale, kind: 'aimed', cdBase: 70 },
-                 { rx: 198, size: 26, hp: 1650 * BOSS_TURRET_MUL * 0.75 * scale, kind: 'aimed', cdBase: 150 },
-                 { rx: 252, size: 34, hp: 1650 * BOSS_TURRET_MUL * scale, kind: 'spread', cdBase: 110 } ],
-      attack: 18 + Math.floor(wave * 0.8), shotEvery: 48 }; // 2b13f76: 18+0.8w every 800 ms
+    boss = { isBig: true, w: 300, h: 120, targetY: 45, speed: 0.8, coreHp: 9000 * BIG_CORE_MUL * scale,
+      turrets: [ { rx: 14, size: 34, hp: 1650 * BIG_TURRET_MUL * scale, kind: 'spread', cdBase: 110 },
+                 { rx: 76, size: 26, hp: 1650 * BIG_TURRET_MUL * BIG_MOUNT_MUL * scale, kind: 'aimed', cdBase: 420 },
+                 { rx: 133, size: 34, hp: 1900 * BIG_TURRET_MUL * scale, kind: 'aimed', cdBase: 70 },
+                 { rx: 198, size: 26, hp: 1650 * BIG_TURRET_MUL * BIG_MOUNT_MUL * scale, kind: 'aimed', cdBase: 420 },
+                 { rx: 252, size: 34, hp: 1650 * BIG_TURRET_MUL * scale, kind: 'spread', cdBase: 110 } ],
+      attack: Math.round((18 + Math.floor(wave * 0.8)) / 2), shotEvery: 150 }; // 2b13f76 was 18+0.8w every 800 ms; halved and every 2.5 s
   } else {
     boss = { isBig: false, w: 170, h: 80, targetY: 60, speed: 1.1, coreHp: 4000 * BOSS_CORE_MUL * scale,
       turrets: [ { rx: 12, size: 28, hp: 950 * BOSS_TURRET_MUL * scale, kind: 'aimed', cdBase: 80 },
