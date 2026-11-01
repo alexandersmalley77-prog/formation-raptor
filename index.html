@@ -421,16 +421,16 @@ function spawnWave() {
   // Random mixed adds
   const extras = 6 + Math.floor(wave * 2);
   for (let i = 0; i < extras; i++) {
-    const types = ['normal', 'charger', 'shooter', 'tank'];
+    const types = ['normal', 'charger', 'shooter', 'tank', 'laser', 'nuke'];
     const type = types[Math.floor(Math.random() * types.length)];
     enemies.push({
       x: 30 + Math.random() * 420,
       y: -100 - Math.random() * 300,
-      w: type === 'tank' ? 30 : 20,
-      h: type === 'tank' ? 30 : 20,
+      w: type === 'tank' ? 30 : type === 'nuke' ? 28 : 20,
+      h: type === 'tank' ? 30 : type === 'nuke' ? 28 : 20,
       vx: (Math.random() - 0.5) * 0.4,
       vy: 0.5 + Math.random() * 0.3,
-      hp: type === 'tank' ? hpBase * 2 : hpBase - 5,
+      hp: type === 'tank' ? hpBase * 2 : type === 'nuke' ? hpBase * 1.5 : hpBase - 5,
       diving: false,
       type
     });
@@ -552,8 +552,8 @@ function gameLoop(ts) {
   enemyBullets = enemyBullets.filter(b => {
     b.x += b.vx;
     b.y += b.vy;
-    ctx.fillStyle = b.type === 'tank' ? '#f40' : '#0ff';
-    ctx.fillRect(b.x - 3, b.y - 3, 6, 6);
+    ctx.fillStyle = b.type === 'tank' ? '#f40' : b.type === 'laser' ? '#0ff' : b.type === 'nuke' ? '#f0f' : '#0ff';
+    ctx.fillRect(b.x - (b.type === 'nuke' ? 6 : 3), b.y - (b.type === 'nuke' ? 6 : 3), b.type === 'nuke' ? 12 : 6, b.type === 'nuke' ? 12 : 6);
     // Hit player
     if (b.x > player.x && b.x < player.x + player.w && b.y > player.y && b.y < player.y + player.h && invuln <= 0 && running) {
       if (hasShield) {
@@ -658,24 +658,41 @@ function gameLoop(ts) {
       }
     }
     e.x += e.vx; e.y += e.vy;
-    // Shooting for shooters and tanks
-    if ((e.type === 'shooter' || e.type === 'tank') && Math.random() < (e.type === 'tank' ? 0.005 : 0.01) && e.y > 50 && e.y < 500) {
+    // Shooting for shooters, tanks, lasers, and nukes
+    if ((e.type === 'shooter' || e.type === 'tank' || e.type === 'laser' || e.type === 'nuke') && Math.random() < (e.type === 'tank' ? 0.005 : e.type === 'nuke' ? 0.003 : 0.01) && e.y > 50 && e.y < 500) {
       const dx = (player.x + player.w/2) - (e.x + e.w/2);
       const dy = (player.y + player.h/2) - (e.y + e.h/2);
       const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-      enemyBullets.push({
-        x: e.x + e.w/2,
-        y: e.y + e.h/2,
-        vx: (dx / dist) * (e.type === 'tank' ? 3 : 4),
-        vy: (dy / dist) * (e.type === 'tank' ? 3 : 4),
-        dmg: (e.type === 'tank' ? 8 + Math.floor(wave * 0.6) : 4 + Math.floor(wave * 0.4)) * enemyProjScale,
-        type: e.type
-      });
+      if (e.type === 'laser') {
+        enemyBullets.push({
+          x: e.x + e.w/2, y: e.y + e.h/2,
+          vx: 0, vy: 8,
+          dmg: (12 + Math.floor(wave * 0.8)) * enemyProjScale,
+          type: 'laser'
+        });
+      } else if (e.type === 'nuke') {
+        enemyBullets.push({
+          x: e.x + e.w/2, y: e.y + e.h/2,
+          vx: (dx / dist) * 2, vy: (dy / dist) * 2,
+          dmg: (20 + Math.floor(wave * 1.2)) * enemyProjScale,
+          type: 'nuke'
+        });
+      } else {
+        enemyBullets.push({
+          x: e.x + e.w/2, y: e.y + e.h/2,
+          vx: (dx / dist) * (e.type === 'tank' ? 3 : 4),
+          vy: (dy / dist) * (e.type === 'tank' ? 3 : 4),
+          dmg: (e.type === 'tank' ? 8 + Math.floor(wave * 0.6) : 4 + Math.floor(wave * 0.4)) * enemyProjScale,
+          type: e.type
+        });
+      }
     }
     // Color by type
     if (e.type === 'tank') ctx.fillStyle = '#a00';
     else if (e.type === 'charger') ctx.fillStyle = '#f80';
     else if (e.type === 'shooter') ctx.fillStyle = '#0af';
+    else if (e.type === 'laser') ctx.fillStyle = '#0ff';
+    else if (e.type === 'nuke') ctx.fillStyle = '#f0f';
     else ctx.fillStyle = e.diving ? '#f00' : '#ff0';
     ctx.fillRect(e.x, e.y, e.w, e.h);
     // Collision + coin drop
