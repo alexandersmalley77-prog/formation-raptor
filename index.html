@@ -351,11 +351,13 @@ function spawnWave() {
     });
   }
 
-  // On boss waves (5, 10, 15...), place boss in the middle of the formation
-  if (wave % 5 === 0 && wave > 0) {
-    // Clear a wider center gap so the boss sits in the middle
-    enemies = enemies.filter(e => Math.abs(e.x - 240) > 110 || e.y < -250);
-    spawnBoss();
+  // Boss waves: mini bosses on odd 10s (10, 30, 50...), big bosses on 20, 40, 60...
+  const isMiniBoss = wave % 20 === 10;
+  const isBigBoss = wave % 20 === 0 && wave > 0;
+  if (isMiniBoss || isBigBoss) {
+    // Clear center so the boss is visible
+    enemies = enemies.filter(e => Math.abs(e.x - 240) > 140 || e.y < -200);
+    spawnBoss(isBigBoss);
   }
 
   // Health bubble every 2 waves
@@ -370,16 +372,33 @@ function spawnWave() {
   }
 }
 
-function spawnBoss() {
-  boss = {
-    x: 140, y: 60,
-    w: 200, h: 110,
-    hp: 350,
-    turrets: [
-      { x: 15, y: 35, hp: 50, active: true },
-      { x: 165, y: 35, hp: 50, active: true }
-    ]
-  };
+function spawnBoss(isBig) {
+  if (isBig) {
+    // Big boss: waves 20, 40, 60...
+    boss = {
+      x: 80, y: 40,
+      w: 320, h: 160,
+      hp: 800 + wave * 40,
+      isBig: true,
+      turrets: [
+        { x: 20, y: 50, hp: 80, active: true },
+        { x: 280, y: 50, hp: 80, active: true },
+        { x: 150, y: 30, hp: 100, active: true }
+      ]
+    };
+  } else {
+    // Mini boss: waves 10, 30, 50...
+    boss = {
+      x: 160, y: 70,
+      w: 160, h: 90,
+      hp: 280 + wave * 20,
+      isBig: false,
+      turrets: [
+        { x: 15, y: 30, hp: 40, active: true },
+        { x: 125, y: 30, hp: 40, active: true }
+      ]
+    };
+  }
 }
 
 function gameLoop(ts) {
@@ -603,32 +622,45 @@ function gameLoop(ts) {
   enemies = enemies.filter(e => e.hp > 0 && e.y < canvas.height);
 
   if (boss) {
-    ctx.fillStyle = '#666';
+    ctx.fillStyle = boss.isBig ? '#844' : '#666';
     ctx.fillRect(boss.x, boss.y, boss.w, boss.h);
+    // HP bar on boss
+    ctx.fillStyle = '#300';
+    ctx.fillRect(boss.x, boss.y - 8, boss.w, 6);
+    ctx.fillStyle = boss.isBig ? '#f40' : '#0f0';
+    const maxHp = boss.isBig ? (800 + wave * 40) : (280 + wave * 20);
+    ctx.fillRect(boss.x, boss.y - 8, boss.w * (boss.hp / maxHp), 6);
     boss.turrets.forEach((t) => {
       if (t.active) {
         ctx.fillStyle = '#f80';
-        ctx.fillRect(boss.x + t.x, boss.y + t.y, 20, 20);
+        ctx.fillRect(boss.x + t.x, boss.y + t.y, boss.isBig ? 28 : 20, boss.isBig ? 28 : 20);
       }
     });
     bullets.forEach(b => {
       if (b.x > boss.x && b.x < boss.x+boss.w && b.y > boss.y && b.y < boss.y+boss.h) {
         boss.hp -= b.dmg; b.y = -999;
         boss.turrets.forEach(t => {
-          if (t.active && b.x > boss.x+t.x && b.x < boss.x+t.x+20) t.hp -= b.dmg;
+          const tw = boss.isBig ? 28 : 20;
+          if (t.active && b.x > boss.x+t.x && b.x < boss.x+t.x+tw) t.hp -= b.dmg;
         });
       }
     });
     boss.turrets.forEach(t => { if (t.hp <= 0) t.active = false; });
-    if (boss.hp <= 0) { coins += 50; runScore += 500; energy = Math.min(20, energy + 2); boss = null; showPowerups(); }
+    if (boss.hp <= 0) { 
+      coins += boss.isBig ? 100 : 40; 
+      runScore += boss.isBig ? 1000 : 400; 
+      energy = Math.min(20, energy + (boss.isBig ? 3 : 1)); 
+      boss = null; 
+      showPowerups(); 
+    }
   }
 
   if (enemies.length === 0 && !boss && running && !picking) {
-    // Only advance if this is not a boss wave that still needs a boss
-    if (wave % 5 === 0 && wave > 0) {
-      // Boss should be here — re-spawn if missing
-      if (!boss) spawnBoss();
-    } else {
+    const isBossWave = (wave % 20 === 0 && wave > 0) || wave % 20 === 10;
+    if (isBossWave && !boss) {
+      // Boss wave but boss missing — spawn it
+      spawnBoss(wave % 20 === 0);
+    } else if (!isBossWave) {
       showPowerups();
     }
   }
