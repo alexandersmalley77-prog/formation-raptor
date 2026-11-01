@@ -44,8 +44,8 @@ button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1p
     <div id="droneBody"></div>
   </div>
   <div style="font-size:18px; margin-bottom:15px;">Formation Raptor</div>
-  <button id="enterBtn" onclick="enterGame()">Enter</button>
-  <button onclick="toggleDrones()">Drones</button>
+  <button id="enterBtn" onclick="window.enterGame=enterGame; enterGame();">Enter</button>
+  <button id="dronesBtn" onclick="window.toggleDrones=toggleDrones; toggleDrones();">Drones</button>
 </div>
 <div id="ui">
   <button onclick="toggleUI()">☰ Options</button>
