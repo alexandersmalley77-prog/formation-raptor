@@ -7,8 +7,13 @@
 <style>
 body { margin:0; background:#000; color:#0f0; font-family:monospace; overflow:hidden; }
 canvas { display:block; position:absolute; top:0; left:0; background:#001122; border:2px solid #0f0; width:100vw; height:100vh; max-width:100vw; max-height:100vh; object-fit:contain; z-index:1; }
-#ui { position:absolute; top:4px; left:4px; color:#0f0; font-size:9px; z-index:100; max-width:40vw; }
-button { margin:1px; padding:3px 5px; background:#003300; color:#0f0; border:1px solid #0f0; cursor:pointer; font-size:9px; touch-action:manipulation; position:relative; z-index:101; }
+#ui { position:absolute; top:4px; left:4px; color:#0f0; font-size:12px; z-index:100; max-width:50vw; }
+#uiPanel { display:none; }
+button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1px solid #0f0; cursor:pointer; font-size:13px; touch-action:manipulation; position:relative; z-index:101; }
+#landing { position:absolute; top:0; left:0; width:100vw; height:100vh; background:#001122; z-index:200; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+#cube { width:60px; height:60px; background:#0af; animation:spin 2s linear infinite; margin-bottom:20px; }
+@keyframes spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+#landing button { font-size:16px; padding:10px 20px; }
 #touchHint { position:absolute; bottom:4px; left:50%; transform:translateX(-50%); color:#0f0; font-size:8px; text-align:center; }
 #powerup { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,20,0,0.95); border:2px solid #0f0; padding:20px; z-index:20; text-align:center; }
 #powerup button { display:block; width:220px; margin:10px auto; font-size:18px; }
@@ -19,7 +24,7 @@ button { margin:1px; padding:3px 5px; background:#003300; color:#0f0; border:1px
 #drones { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,20,0,0.95); border:2px solid #0f0; padding:20px; z-index:30; text-align:center; min-width:260px; }
 #drones button { display:block; width:220px; margin:8px auto; font-size:16px; }
 #scoreList { text-align:left; margin:10px 0; font-size:14px; }
-#leaderboard { position:absolute; top:50px; left:4px; color:#0f0; font-size:8px; z-index:100; background:rgba(0,20,0,0.6); border:1px solid #0f0; padding:2px; min-width:80px; max-height:70px; overflow-y:auto; }
+#leaderboard { position:absolute; top:50px; left:4px; color:#0f0; font-size:8px; z-index:100; background:rgba(0,20,0,0.6); border:1px solid #0f0; padding:2px; min-width:80px; max-height:70px; overflow-y:auto; display:none; }
 #controls { position:absolute; top:40px; right:4px; background:rgba(0,20,0,0.92); border:1px solid #0f0; padding:2px; z-index:15; font-size:8px; max-height:30vh; overflow-y:auto; width:90px; display:none; }
 #controls label { display:block; margin:6px 0 2px; }
 #controls input[type=range] { width:100%; }
@@ -27,6 +32,11 @@ button { margin:1px; padding:3px 5px; background:#003300; color:#0f0; border:1px
 </style>
 </head>
 <body>
+<div id="landing">
+  <div id="cube"></div>
+  <div style="font-size:18px; margin-bottom:15px;">Formation Raptor</div>
+  <button onclick="enterGame()">Enter</button>
+</div>
 <div id="ui">
   <button onclick="toggleUI()">☰ Options</button>
   <div id="uiPanel">
@@ -169,6 +179,19 @@ function upgradeDrone() {
     updateDroneUI();
   }
 }
+  const panel = document.getElementById('uiPanel');
+  const lb = document.getElementById('leaderboard');
+  const open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  if (lb) lb.style.display = open ? 'none' : 'block';
+}
+
+function enterGame() {
+  document.getElementById('landing').style.display = 'none';
+  document.getElementById('uiPanel').style.display = 'block';
+}
+
+function toggleUI() {
   const panel = document.getElementById('uiPanel');
   const lb = document.getElementById('leaderboard');
   const open = panel.style.display !== 'none';
