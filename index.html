@@ -557,10 +557,13 @@ const gridTile = (() => {
   g.strokeStyle = 'rgba(40,255,220,0.04)'; g.beginPath(); g.moveTo(0, GRID_TILE / 2); g.lineTo(W, GRID_TILE / 2); g.stroke();
   return c;
 })();
+// Level scroll speed: everything tied to the scroll (grid, nebula, stars, enemy descent, drifting pickups) is
+// multiplied by SCROLL. 1.12 = 12% faster than the original values written below.
+const SCROLL = 1.12;
 const starLayers = [
-  { n: 45, speed: 0.25, size: 1, color: '#2a4a6a' },
-  { n: 25, speed: 0.7, size: 1.6, color: '#5ab0ff' },
-  { n: 8, speed: 2.4, size: 1.2, color: '#bdf', streak: 10 }
+  { n: 45, speed: 0.25 * SCROLL, size: 1, color: '#2a4a6a' },
+  { n: 25, speed: 0.7 * SCROLL, size: 1.6, color: '#5ab0ff' },
+  { n: 8, speed: 2.4 * SCROLL, size: 1.2, color: '#bdf', streak: 10 }
 ].map(L => Object.assign(L, { stars: Array.from({ length: L.n }, () => ({ x: Math.random() * W, y: Math.random() * H })) }));
 let gridY = 0, nebY = 0;
 
@@ -806,11 +809,11 @@ function updateSpecial(e) {
     if (--e.charge > 0) return;
     if (e.type === 'laser') {
       enemyBullets.push({ x: cx, y: cy + e.h / 2, vx: 0, vy: 8, dmg: (12 + Math.floor(wave * 0.8)) * enemyProjScale, r: 4, color: '#ffd23f', kind: 'laser' });
-      e.cool = 30; e.vy = 0.5;
+      e.cool = 30; e.vy = 0.5 * SCROLL;
     } else {
       const tx = player.x + player.w / 2, ty = player.y + player.h / 2, a = Math.atan2(ty - cy, tx - cx), d = Math.hypot(tx - cx, ty - cy);
       enemyBullets.push({ x: cx, y: cy, vx: Math.cos(a) * 2, vy: Math.sin(a) * 2, dmg: (20 + Math.floor(wave * 1.2)) * enemyProjScale, r: 6, color: '#b6ff3a', kind: 'nuke', tx, ty, life: Math.ceil(d / 2) });
-      e.cool = 60; e.vy = 0.5;
+      e.cool = 60; e.vy = 0.5 * SCROLL;
     }
     return;
   }
@@ -825,7 +828,7 @@ function nukeBlast(b) {
 function makeEnemy(x, y, type, hpBase) {
   const sz = enemyBase(type);
   const hp = type === 'tank' ? hpBase * 2.5 : type === 'nuke' ? hpBase * 1.5 : hpBase; // nuke 1.5x (0f2a25f)
-  return { x, y, w: sz, h: sz, vx: 0, vy: 0.9, hp, diving: false, type, charge: 0, cool: 0 };
+  return { x, y, w: sz, h: sz, vx: 0, vy: 0.9 * SCROLL, hp, diving: false, type, charge: 0, cool: 0, rot: 0 };
 }
 const PATTERNS = [
   (n, y0, hp) => { const x = 120 + Math.random() * 220; for (let i = 0; i < n; i++) enemies.push(makeEnemy(x, y0 - i * 26, pickType(wave), hp)); },
@@ -833,8 +836,104 @@ const PATTERNS = [
   (n, y0, hp) => { for (let i = 0; i < n; i++) { const k = Math.ceil(i / 2), s = i % 2 ? 1 : -1; enemies.push(makeEnemy(229 + s * k * 30, y0 - k * 20, pickType(wave), hp)); } },
   (n, y0, hp) => { const cols = Math.min(n, 6); for (let i = 0; i < n; i++) enemies.push(makeEnemy(80 + (i % cols) * 60, y0 - Math.floor(i / cols) * 34, pickType(wave), hp)); }
 ];
+
+// ---------- Galaga-style flight groups ----------
+// A group of enemies follows one smooth path (Catmull-Rom spline through control points, arc-length sampled so
+// speed is constant), each member delayed so they move as a chain. Members face their heading. At the end of the
+// path they either join the normal descending formation ('join') or leave the screen ('exit', no reward).
+// Entry paths never fire; only strafing runs from wave 5 fire a one-shot-per-ship burst.
+const FLIGHT_START = { sweep: 1, scurve: 1, vdive: 3, loop: 3, strafe: 4, peel: 3 }; // first wave each pattern can appear
+const STRAFE_FIRE_WAVE = 5, STRAFE_WARN = 70; // frames of edge-chevron telegraph before a strafe enters
+let warnings = []; // strafe telegraphs: { side: -1 left | 1 right, y, t }
+let peelCd = 0;
+function buildPath(pts) {
+  const seg = [], P = [pts[0], ...pts, pts[pts.length - 1]];
+  for (let i = 1; i < P.length - 2; i++) {
+    const p0 = P[i - 1], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2];
+    for (let j = 0; j < 16; j++) {
+      const t = j / 16, t2 = t * t, t3 = t2 * t;
+      seg.push([0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+                0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)]);
+    }
+  }
+  seg.push(pts[pts.length - 1]);
+  const len = [0];
+  for (let i = 1; i < seg.length; i++) len.push(len[i - 1] + Math.hypot(seg[i][0] - seg[i - 1][0], seg[i][1] - seg[i - 1][1]));
+  return { pts: seg, len, total: len[len.length - 1] };
+}
+function pathAt(path, d) { // position + heading at arc length d
+  const L = path.len, P = path.pts;
+  if (d <= 0) return [P[0][0], P[0][1], Math.atan2(P[1][1] - P[0][1], P[1][0] - P[0][0])];
+  let lo = 0, hi = L.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (L[m] < d) lo = m; else hi = m; }
+  const a = P[lo], b = P[hi], f = Math.min(1, (d - L[lo]) / Math.max(1e-6, L[hi] - L[lo]));
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, Math.atan2(b[1] - a[1], b[0] - a[0])];
+}
+function flightSpeed(kind) { // px per frame along the path; gentle and capped
+  return kind === 'strafe' ? Math.min(4.2, 3 + wave * 0.08) : Math.min(2.8, (wave <= 2 ? 1.7 : 1.8) + wave * 0.06);
+}
+function pickFlight() {
+  const ok = Object.keys(FLIGHT_START).filter(k => k !== 'peel' && wave >= FLIGHT_START[k]);
+  return ok[Math.floor(Math.random() * ok.length)];
+}
+// n enemies, starting `delay` frames from now. Returns the kind used.
+function spawnFlight(kind, n, delay, hp) {
+  const dir = Math.random() < 0.5 ? 1 : -1, mx = x => dir > 0 ? x : W - x; // mirror left/right
+  if (kind === 'strafe') delay = Math.max(delay, STRAFE_WARN + 10); // always leave time for the edge telegraph
+  const sp = flightSpeed(kind), gap = Math.round(34 / sp) + 4; // chain spacing in frames
+  const lane = PLAY.y + 30 + Math.random() * 90; // strafe lane: upper part of the player's zone
+  const px = Math.max(90, Math.min(W - 90, player.x + player.w / 2));
+  for (let i = 0; i < n; i++) {
+    const slotX = W / 2 + (i - (n - 1) / 2) * 44 + (Math.random() - 0.5) * 10, slotY = 70 + (i % 2) * 18;
+    let pts, end = 'join', d0 = -(delay + i * gap) * sp;
+    if (kind === 'sweep') pts = [[mx(-40), 60], [mx(70), 190], [mx(240), 250], [mx(400), 190], [slotX, slotY]];
+    else if (kind === 'scurve') { const c = 150 + Math.random() * 180; pts = [[c, -40], [c + 100 * dir, 40], [c - 100 * dir, 130], [c + 60 * dir, 200], [slotX, slotY]]; }
+    else if (kind === 'loop') {
+      const cx = mx(140) + 60 * dir, cy = 210, r = 58; pts = [[mx(140), -40], [mx(140), 120]];
+      for (let k = 0; k <= 8; k++) { const a = Math.PI - 2 * Math.PI * k / 8; pts.push([cx + dir * r * Math.cos(a), cy + r * Math.sin(a)]); } // loop-de-loop: down, around, back over the top
+      pts.push([slotX, slotY]);
+    } else if (kind === 'vdive') { // V formation: leader in front, wings behind and to the side; dive at the player, pull up
+      const k = Math.ceil(i / 2), side = i % 2 ? 1 : -1, ox = side * k * 30, oy = -k * 26;
+      pts = [[px + ox, -40 + oy], [px + ox * 0.8, 160 + oy], [px + ox * 0.6, 430 + oy], [px + ox + dir * 140, 300 + oy], [slotX, slotY]];
+      d0 = -(delay + k * 4) * sp; // the V keeps its shape (small stagger only)
+    } else if (kind === 'strafe') {
+      pts = [[mx(-50), lane - 140], [mx(30), lane - 30], [mx(140), lane], [mx(340), lane], [mx(W + 50), lane - 40]];
+      end = 'exit';
+    }
+    const e = makeEnemy(pts[0][0], pts[0][1], kind === 'strafe' ? (Math.random() < 0.7 ? 'normal' : 'charger') : pickType(wave), hp);
+    e.x = pts[0][0] - e.w / 2; e.y = pts[0][1] - e.h / 2;
+    e.fp = { path: buildPath(pts), d: d0, sp, end, kind, fire: kind === 'strafe' && wave >= STRAFE_FIRE_WAVE, fired: false,
+             warn: kind === 'strafe' && i === 0 ? { side: -dir, y: lane } : null };
+    enemies.push(e);
+  }
+  return kind;
+}
+// Dive-bomb peel-off: an enemy already in formation curls out, dives through the player's column and exits.
+function peelOff(e) {
+  const cx = e.x + e.w / 2, cy = e.y + e.h / 2, side = cx < W / 2 ? 1 : -1, tx = player.x + player.w / 2;
+  e.fp = { path: buildPath([[cx, cy], [cx - side * 40, cy - 30], [cx - side * 20, cy + 60], [tx, PLAY.y + 160], [tx + side * 60, H + 60]]),
+           d: 0, sp: Math.min(3.4, 2.4 + wave * 0.06), end: 'exit', kind: 'peel', fire: false };
+  e.wob = undefined; e.vx = 0;
+}
+function updateFlight(e) { // returns true while the enemy is still on its path
+  const f = e.fp;
+  if (f.warn && !f.warned && f.d >= -STRAFE_WARN * f.sp) { f.warned = true; warnings.push({ side: f.warn.side, y: f.warn.y, t: STRAFE_WARN }); }
+  f.d += f.sp;
+  const [x, y, a] = pathAt(f.path, f.d);
+  e.x = x - e.w / 2; e.y = y - e.h / 2; e.waiting = f.d < 0;
+  if (!e.waiting) { let da = (a - Math.PI / 2) - e.rot; da = Math.atan2(Math.sin(da), Math.cos(da)); e.rot += da * 0.25; } // face heading (sprites point down)
+  if (f.fire && !f.fired && x > 150 && x < W - 150) { // strafing burst: one aimed shot per ship as it crosses the middle
+    f.fired = true; shoot(x, y, angleToPlayer(x, y), 3.2, (4 + Math.floor(wave * 0.4)) * enemyProjScale, '#ff4466');
+  }
+  if (f.d >= f.path.total) {
+    if (f.end === 'exit') { e.hp = 0; e.gone = true; return true; }
+    e.fp = null; e.waiting = false; e.diving = false; e.vx = 0; e.vy = 0.9 * SCROLL; // join the formation
+    return false;
+  }
+  return true;
+}
 function spawnWave() {
-  enemies = []; enemyBullets = [];
+  enemies = []; enemyBullets = []; warnings = []; peelCd = 240;
   const hpBase = (16 + wave * 5) * enemyHPScale;
   const bossWave = isMiniBossWave(wave) || isBigBossWave(wave);
   if (bossWave) {
@@ -842,20 +941,22 @@ function spawnWave() {
     // a few escorts on the flanks
     const esc = 4 + Math.floor(wave / 10) * 2;
     for (let i = 0; i < esc; i++) enemies.push(makeEnemy(i % 2 ? 420 : 40, -60 - Math.floor(i / 2) * 120, 'charger', hpBase));
-    shieldBubbles.push({ x: 60 + Math.random() * 340, y: -200, w: 30, h: 30, vy: 0.8, hp: 120 });
+    shieldBubbles.push({ x: 60 + Math.random() * 340, y: -200, w: 30, h: 30, vy: 0.8 * SCROLL, hp: 120 });
     banner = { text: isBigBossWave(wave) ? 'WARNING: BOSS' : 'MINI BOSS', t: 120 };
   } else if (mode === 'single') {
-    enemies.push({ x: 195, y: -120, w: 90, h: 90, vx: 0.15, vy: 0.4, hp: 800 + wave * 150, diving: false, type: 'tank' });
+    enemies.push({ x: 195, y: -120, w: 90, h: 90, vx: 0.15, vy: 0.4 * SCROLL, hp: 800 + wave * 150, diving: false, type: 'tank' });
   } else {
     let remaining = waveEnemyCount(wave), g = 0;
     while (remaining > 0) {
       const n = Math.min(remaining, 5 + Math.floor(Math.random() * 4));
-      PATTERNS[Math.floor(Math.random() * PATTERNS.length)](n, -40 - g * 170, hpBase);
+      // Mix: classic column groups and Galaga flight groups (share grows gently with the wave; same total count)
+      if (Math.random() < Math.min(0.6, 0.35 + wave * 0.04)) spawnFlight(pickFlight(), n, 30 + g * 150, hpBase);
+      else PATTERNS[Math.floor(Math.random() * PATTERNS.length)](n, -40 - g * 170, hpBase);
       remaining -= n; g++;
     }
     banner = { text: 'WAVE ' + wave, t: 70 };
   }
-  if (wave % 2 === 0) healthBubbles.push({ x: 100 + Math.random() * 280, y: -50, w: 28, h: 28, vy: 1.4, heal: 25 + wave * 2 });
+  if (wave % 2 === 0) healthBubbles.push({ x: 100 + Math.random() * 280, y: -50, w: 28, h: 28, vy: 1.4 * SCROLL, heal: 25 + wave * 2 });
 }
 
 // ===================== Bosses =====================
@@ -1023,20 +1124,31 @@ function update(ts) {
   bullets.forEach(b => b.y += b.vy);
 
   // Enemies
+  if (!boss && wave >= FLIGHT_START.peel && --peelCd <= 0) { // occasional dive-bomb peel-off from the formation
+    peelCd = Math.max(150, 330 - wave * 12);
+    const c = enemies.filter(e => !e.fp && e.y > 40 && e.y < 200 && e.type !== 'tank' && e.charge <= 0);
+    if (c.length) peelOff(c[Math.floor(Math.random() * c.length)]);
+  }
+  warnings = warnings.filter(w => --w.t > 0);
   enemies.forEach(e => {
+    if (e.fp && updateFlight(e)) {
+      if (e.waiting || e.gone) return; // off-screen in the queue: no collisions yet
+    } else {
+    if (Math.abs(e.rot) > 0.001) e.rot *= 0.85; // ease back to facing down after a flight path
     if (!e.diving && e.y > 100) {
       e.diving = true;
-      if (e.type === 'charger') { e.vy = 2.2; e.vx = (player.x - e.x) * 0.012; }
-      else if (e.type === 'shooter') { e.vy = 0.8; e.wob = Math.random() * 6; }
-      else if (e.type === 'tank') { e.vy = 0.6; e.vx = (player.x - e.x) * 0.004; }
-      else if (e.type === 'laser' || e.type === 'nuke') { e.vy = 0.5; e.wob = Math.random() * 6; } // linger to fire
-      else { e.vy = 1.2; e.wob = Math.random() * 6; }
+      if (e.type === 'charger') { e.vy = 2.2 * SCROLL; e.vx = (player.x - e.x) * 0.012; }
+      else if (e.type === 'shooter') { e.vy = 0.8 * SCROLL; e.wob = Math.random() * 6; }
+      else if (e.type === 'tank') { e.vy = 0.6 * SCROLL; e.vx = (player.x - e.x) * 0.004; }
+      else if (e.type === 'laser' || e.type === 'nuke') { e.vy = 0.5 * SCROLL; e.wob = Math.random() * 6; } // linger to fire
+      else { e.vy = 1.2 * SCROLL; e.wob = Math.random() * 6; }
     }
     if (e.wob !== undefined) e.vx = Math.sin(ts / 400 + e.wob) * (e.type === 'shooter' ? 1.0 : 0.5);
-    if (e.charge > 0) { e.vx = 0; e.vy = Math.min(e.vy, 0.2); } // hold position while telegraphing
+    if (e.charge > 0) { e.vx = 0; e.vy = Math.min(e.vy, 0.2 * SCROLL); } // hold position while telegraphing
     e.x += e.vx; e.y += e.vy;
     if (e.type === 'laser' || e.type === 'nuke') updateSpecial(e);
-    if ((e.type === 'shooter' || e.type === 'tank') && e.y > 50 && e.y < 500 && Math.random() < (e.type === 'tank' ? 0.005 : 0.008)) {
+    }
+    if (!e.fp && (e.type === 'shooter' || e.type === 'tank') && e.y > 50 && e.y < 500 && Math.random() < (e.type === 'tank' ? 0.005 : 0.008)) {
       const cx = e.x + e.w / 2, cy = e.y + e.h / 2;
       const dmg = (e.type === 'tank' ? 8 + Math.floor(wave * 0.6) : 4 + Math.floor(wave * 0.4)) * enemyProjScale;
       shoot(cx, cy, angleToPlayer(cx, cy), e.type === 'tank' ? 3 : 4, dmg, e.type === 'tank' ? '#f40' : '#ff4466');
@@ -1051,7 +1163,7 @@ function update(ts) {
           if (coinFx.length < 30) coinFx.push({ x: e.x + e.w / 2, y: e.y + e.h / 2, t: 0 });
           const base = Math.max(0.004, 0.012 - wave * 0.0008);
           const chance = base * (e.type === 'tank' ? 3 : e.type === 'charger' ? 2 : e.type === 'shooter' ? 1.5 : 1);
-          if (Math.random() < chance) healthBubbles.push({ x: e.x, y: e.y, w: 24, h: 24, vy: 0.8, heal: 15 + Math.floor(wave * 1.5) });
+          if (Math.random() < chance) healthBubbles.push({ x: e.x, y: e.y, w: 24, h: 24, vy: 0.8 * SCROLL, heal: 15 + Math.floor(wave * 1.5) });
           break;
         }
       }
@@ -1063,7 +1175,7 @@ function update(ts) {
       if (damagePlayer(base * contactDmgScale, 30)) { e.hp = 0; burst(e.x + e.w / 2, e.y + e.h / 2, ENEMY_COL[e.type], 8); } // rammed enemy dies
     }
   });
-  enemies = enemies.filter(e => e.hp > 0 && e.y < H);
+  enemies = enemies.filter(e => e.hp > 0 && e.y < H + (e.fp ? 80 : 0));
 
   if (boss && state === 'running') {
     updateBoss();
@@ -1125,7 +1237,7 @@ function burst(x, y, color, n, big) {
   if (rings.length > 40) rings.splice(0, rings.length - 40);
 }
 function fxStep(k) {
-  gridY += 0.6 * k; nebY += 0.12 * k;
+  gridY += 0.6 * SCROLL * k; nebY += 0.12 * SCROLL * k;
   starLayers.forEach(L => L.stars.forEach(s => { s.y += L.speed * k; if (s.y > H) { s.y -= H + 12; s.x = Math.random() * W; } }));
   const damp = Math.pow(0.97, k);
   debris = debris.filter(p => { p.x += p.vx * k; p.y += p.vy * k; p.vx *= damp; p.vy *= damp; p.a += p.va * k; p.life -= k; return p.life > 0; });
@@ -1192,6 +1304,27 @@ function renderPlayFrame() {
   ctx.stroke();
 }
 function renderEnemy(e) {
+  if (e.waiting) return;
+  const turned = Math.abs(e.rot || 0) > 0.01;
+  if (turned) { const cx = e.x + e.w / 2, cy = e.y + e.h / 2; ctx.save(); ctx.translate(cx, cy); ctx.rotate(e.rot); ctx.translate(-cx, -cy); }
+  drawEnemy(e);
+  if (turned) ctx.restore();
+}
+function renderWarnings() { // strafe telegraph: pulsing chevrons on the entry edge, pointing inward along the lane
+  if (!warnings.length) return;
+  ctx.globalCompositeOperation = 'lighter'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+  warnings.forEach(w => {
+    const a = (0.45 + 0.55 * Math.abs(Math.sin(animT * 0.018))) * Math.min(1, w.t / 12);
+    const x0 = w.side < 0 ? 10 : W - 10, s = -w.side;
+    ctx.beginPath();
+    for (let k = 0; k < 3; k++) { const x = x0 + s * k * 13; ctx.moveTo(x, w.y - 11); ctx.lineTo(x + s * 10, w.y); ctx.lineTo(x, w.y + 11); }
+    ctx.lineWidth = 7; ctx.strokeStyle = 'rgba(255,40,80,' + (a * 0.3).toFixed(2) + ')'; ctx.stroke(); // soft glow pass (no shadowBlur: cheap)
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,90,120,' + a.toFixed(2) + ')'; ctx.stroke();
+    ctx.globalAlpha = a * 0.35; ctx.setLineDash([6, 10]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x0 + s * 40, w.y); ctx.lineTo(W / 2, w.y); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.lineWidth = 3;
+  });
+  ctx.globalCompositeOperation = 'source-over';
+}
+function drawEnemy(e) {
   const base = enemyBase(e.type), s = e.w / base, sp = enemySprites[e.type];
   const cx = e.x + e.w / 2, cy = e.y + e.h / 2, u = (base * ENEMY_SCALE / 100) * s; // px per art unit
   if (e.type === 'charger') {
@@ -1245,6 +1378,7 @@ function render() {
 
   enemies.forEach(renderEnemy);
   if (boss) renderBoss();
+  renderWarnings();
 
   const dBolt = DRONE_BOLTS[Math.min(droneLevel, 6) - 1];
   bullets.forEach(b => { if (b.y > -20) blit(b.drone ? dBolt : PLAYER_BOLT, b.x + 3, b.y + 6); });
