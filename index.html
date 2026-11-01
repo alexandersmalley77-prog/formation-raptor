@@ -14,6 +14,9 @@ button { margin:5px; padding:12px 16px; background:#003300; color:#0f0; border:1
 #powerup button { display:block; width:220px; margin:10px auto; font-size:18px; }
 #upgrades { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,20,0,0.95); border:2px solid #0f0; padding:20px; z-index:25; text-align:center; min-width:260px; }
 #upgrades button { display:block; width:220px; margin:8px auto; font-size:16px; }
+#scores { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,20,0,0.95); border:2px solid #0f0; padding:20px; z-index:30; text-align:center; min-width:260px; }
+#scores button { display:block; width:220px; margin:10px auto; font-size:16px; }
+#scoreList { text-align:left; margin:10px 0; font-size:14px; }
 #controls { position:absolute; top:70px; right:8px; background:rgba(0,20,0,0.92); border:1px solid #0f0; padding:8px; z-index:15; font-size:11px; max-height:60vh; overflow-y:auto; width:160px; display:none; }
 #controls label { display:block; margin:6px 0 2px; }
 #controls input[type=range] { width:100%; }
@@ -29,6 +32,7 @@ button { margin:5px; padding:12px 16px; background:#003300; color:#0f0; border:1
   <button onclick="togglePause()">Pause</button>
   <button onclick="toggleUpgrades()">Upgrades</button>
   <button onclick="document.getElementById('controls').style.display=document.getElementById('controls').style.display==='block'?'none':'block'">Tune</button>
+  <button onclick="showScores()">Scores</button>
 </div>
 <div id="touchHint">Touch & drag anywhere to move</div>
 <div id="controls">
@@ -58,11 +62,16 @@ button { margin:5px; padding:12px 16px; background:#003300; color:#0f0; border:1
 <div id="upgrades">
   <div style="font-size:20px; margin-bottom:10px;">Permanent Upgrades</div>
   <div>Coins: <span id="upgCoins">0</span></div>
-  <button id="btnDmg" onclick="buyDamage()">+5 Damage (10 coins)</button>
-  <button id="btnFR" onclick="buyFireRate()">+Fire Rate (15 coins)</button>
-  <button id="btnSpd" onclick="buySpeed()">+1 Speed (12 coins)</button>
-  <button id="btnHP" onclick="buyMaxHP()">+20 Max HP (20 coins)</button>
+  <button id="btnDmg" onclick="buyDamage()">+5 Damage (100 coins)</button>
+  <button id="btnFR" onclick="buyFireRate()">+Fire Rate (100 coins)</button>
+  <button id="btnSpd" onclick="buySpeed()">+1 Speed (100 coins)</button>
+  <button id="btnHP" onclick="buyMaxHP()">+20 Max HP (100 coins)</button>
   <button onclick="toggleUpgrades()">Close</button>
+</div>
+<div id="scores">
+  <div style="font-size:20px; margin-bottom:10px;">Top Scores</div>
+  <div id="scoreList"></div>
+  <button onclick="document.getElementById('scores').style.display='none'">Close</button>
 </div>
 <canvas id="game" width="480" height="720"></canvas>
 <script>
@@ -91,6 +100,8 @@ let enemyHPScale = 1;
 let contactDmgScale = 1;
 let enemyProjScale = 1;
 let dmgBuys = 0, frBuys = 0, spdBuys = 0, hpBuys = 0;
+let runScore = 0;
+let highScores = JSON.parse(localStorage.getItem('fr_scores') || '[]');
 
 function setDamage(v) { damage = parseInt(v); document.getElementById('dmgVal').textContent = v; }
 function setFireRate(v) { fireRate = parseInt(v); document.getElementById('frVal').textContent = v; }
@@ -136,10 +147,21 @@ function toggleMode() {
   updateUI();
 }
 
-function togglePause() {
-  if (!running) return;
-  paused = !paused;
-  event.target.textContent = paused ? 'Resume' : 'Pause';
+function showScores() {
+  const el = document.getElementById('scores');
+  const list = document.getElementById('scoreList');
+  list.innerHTML = highScores.length ? highScores.map((s,i) => 
+    (i+1) + '. Wave ' + s.wave + ' — ' + s.score + ' pts'
+  ).join('<br>') : 'No scores yet';
+  el.style.display = 'block';
+}
+
+function saveScore() {
+  const entry = { wave: wave, score: runScore, date: new Date().toLocaleDateString() };
+  highScores.push(entry);
+  highScores.sort((a,b) => b.score - a.score);
+  highScores = highScores.slice(0, 10);
+  localStorage.setItem('fr_scores', JSON.stringify(highScores));
 }
 
 function startRun() {
@@ -155,6 +177,7 @@ function startRun() {
   healthBubbles = [];
   hasShield = false;
   wave = 1;
+  runScore = 0;
   damage = 36;
   fireRate = 110;
   multiShot = 1;
@@ -411,7 +434,8 @@ function gameLoop(ts) {
       if (player.hp <= 0) {
         player.hp = 0;
         running = false;
-        alert('Run ended! HP depleted.');
+        alert('Run ended! Wave ' + wave + ' — Score: ' + runScore);
+        saveScore();
       }
       updateUI();
       return false;
@@ -530,6 +554,7 @@ function gameLoop(ts) {
           else if (e.type === 'charger') drop = 3;
           else if (e.type === 'shooter') drop = 2;
           coins += drop;
+          runScore += drop * 10;
           if (e.type === 'tank') energy = Math.min(20, energy + 1);
           // Chance to drop health bubble — starts ~1% at wave 1, decreases slowly
           let baseChance = Math.max(0.004, 0.012 - wave * 0.0008);
@@ -571,7 +596,7 @@ function gameLoop(ts) {
       }
     });
     boss.turrets.forEach(t => { if (t.hp <= 0) t.active = false; });
-    if (boss.hp <= 0) { coins += 50; energy = Math.min(20, energy + 2); boss = null; showPowerups(); }
+    if (boss.hp <= 0) { coins += 50; runScore += 500; energy = Math.min(20, energy + 2); boss = null; showPowerups(); }
   }
 
   if (enemies.length === 0 && !boss && running && !picking) {
@@ -605,7 +630,8 @@ function gameLoop(ts) {
         if (player.hp <= 0) {
           player.hp = 0;
           running = false;
-          alert('Run ended! HP depleted.');
+          saveScore();
+          alert('Run ended! Wave ' + wave + ' — Score: ' + runScore);
         }
       }
       updateUI();
