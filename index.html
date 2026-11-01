@@ -16,6 +16,8 @@ button { margin:1px; padding:3px 5px; background:#003300; color:#0f0; border:1px
 #upgrades button { display:block; width:220px; margin:8px auto; font-size:16px; }
 #scores { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,20,0,0.95); border:2px solid #0f0; padding:20px; z-index:30; text-align:center; min-width:260px; }
 #scores button { display:block; width:220px; margin:10px auto; font-size:16px; }
+#drones { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,20,0,0.95); border:2px solid #0f0; padding:20px; z-index:30; text-align:center; min-width:260px; }
+#drones button { display:block; width:220px; margin:8px auto; font-size:16px; }
 #scoreList { text-align:left; margin:10px 0; font-size:14px; }
 #leaderboard { position:absolute; top:50px; left:4px; color:#0f0; font-size:8px; z-index:100; background:rgba(0,20,0,0.6); border:1px solid #0f0; padding:2px; min-width:80px; max-height:70px; overflow-y:auto; }
 #controls { position:absolute; top:40px; right:4px; background:rgba(0,20,0,0.92); border:1px solid #0f0; padding:2px; z-index:15; font-size:8px; max-height:30vh; overflow-y:auto; width:90px; display:none; }
@@ -35,6 +37,7 @@ button { margin:1px; padding:3px 5px; background:#003300; color:#0f0; border:1px
   <button onclick="togglePause()">Pause</button>
   <button onclick="toggleUpgrades()">Upgrades</button>
   <button onclick="document.getElementById('controls').style.display=document.getElementById('controls').style.display==='block'?'none':'block'">Tune</button>
+  <button onclick="toggleDrones()">Drones</button>
   </div>
 </div>
 <div id="leaderboard">
@@ -80,6 +83,14 @@ button { margin:1px; padding:3px 5px; background:#003300; color:#0f0; border:1px
   <div id="scoreList"></div>
   <button onclick="document.getElementById('scores').style.display='none'">Close</button>
 </div>
+<div id="drones">
+  <div style="font-size:20px; margin-bottom:10px;">Drone Bay</div>
+  <div id="dronePreview" style="width:60px; height:40px; margin:10px auto; border:1px solid #0f0;"></div>
+  <div>Level: <span id="droneLevel">1</span> | Color: <span id="droneColorName">Basic</span></div>
+  <button onclick="upgradeDrone()">Upgrade Drone (100 coins)</button>
+  <div style="margin-top:10px; font-size:12px;">Upgrades change drone color and boost damage.</div>
+  <button onclick="toggleDrones()">Close</button>
+</div>
 <canvas id="game" width="480" height="720"></canvas>
 <script>
 const canvas = document.getElementById('game');
@@ -109,6 +120,9 @@ let enemyProjScale = 1;
 let dmgBuys = 0, frBuys = 0, spdBuys = 0, hpBuys = 0;
 let runScore = 0;
 let highScores = JSON.parse(localStorage.getItem('fr_scores') || '[]');
+let droneLevel = parseInt(localStorage.getItem('fr_droneLevel') || '1');
+const droneColors = ['#0af', '#0ff', '#ff0', '#f80', '#f0f', '#fff'];
+const droneNames = ['Basic', 'Enhanced', 'Advanced', 'Elite', 'Master', 'Legend'];
 
 function setDamage(v) { damage = parseInt(v); document.getElementById('dmgVal').textContent = v; }
 function setFireRate(v) { fireRate = parseInt(v); document.getElementById('frVal').textContent = v; }
@@ -128,7 +142,33 @@ const powerups = [
   { name: "+Speed", apply: () => { player.speed += 1; } }
 ];
 
-function toggleUI() {
+function toggleDrones() {
+  const el = document.getElementById('drones');
+  const open = el.style.display === 'block';
+  el.style.display = open ? 'none' : 'block';
+  if (!open) updateDroneUI();
+}
+
+function updateDroneUI() {
+  const color = droneColors[Math.min(droneLevel - 1, droneColors.length - 1)];
+  const name = droneNames[Math.min(droneLevel - 1, droneNames.length - 1)];
+  document.getElementById('droneLevel').textContent = droneLevel;
+  document.getElementById('droneColorName').textContent = name;
+  document.getElementById('dronePreview').style.background = color;
+  const cost = 100 + (droneLevel - 1) * 50;
+  document.querySelector('#drones button').textContent = 'Upgrade Drone (' + cost + ' coins)';
+}
+
+function upgradeDrone() {
+  const cost = 100 + (droneLevel - 1) * 50;
+  if (coins >= cost && droneLevel < droneColors.length) {
+    coins -= cost;
+    droneLevel++;
+    localStorage.setItem('fr_droneLevel', droneLevel);
+    updateUI();
+    updateDroneUI();
+  }
+}
   const panel = document.getElementById('uiPanel');
   const lb = document.getElementById('leaderboard');
   const open = panel.style.display !== 'none';
@@ -431,10 +471,10 @@ function gameLoop(ts) {
   drones.forEach(d => {
     const dx = player.x + d.offsetX;
     const dy = player.y + d.offsetY;
-    ctx.fillStyle = '#0af';
+    ctx.fillStyle = droneColors[Math.min(droneLevel - 1, droneColors.length - 1)];
     ctx.fillRect(dx, dy, 14, 14);
     if (ts - d.lastShot > 180) {
-      const waveDamage = Math.floor(damage * (1 + (wave - 1) * 0.08));
+      const waveDamage = Math.floor(damage * (1 + (wave - 1) * 0.08) * (1 + (droneLevel - 1) * 0.15));
       bullets.push({ x: dx + 4, y: dy, vy: -7, dmg: Math.floor(waveDamage * 0.6) });
       d.lastShot = ts;
     }
@@ -772,6 +812,7 @@ canvas.addEventListener('mouseup', () => { touchX = null; touchY = null; });
 
 updateUI();
 updateHomeScores();
+updateDroneUI();
 requestAnimationFrame(gameLoop);
 
 // Extra touch support for Start button on mobile
