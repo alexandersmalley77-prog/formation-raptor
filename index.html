@@ -44,7 +44,7 @@ button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1p
     <div id="droneBody"></div>
   </div>
   <div style="font-size:18px; margin-bottom:15px;">Formation Raptor</div>
-  <button onclick="enterGame()">Enter</button>
+  <button id="enterBtn" onclick="enterGame()">Enter</button>
   <button onclick="toggleDrones()">Drones</button>
 </div>
 <div id="ui">
@@ -194,9 +194,12 @@ function upgradeDrone() {
 }
 
 function enterGame() {
-  document.getElementById('landing').style.display = 'none';
-  document.getElementById('uiPanel').style.display = 'block';
-  document.getElementById('leaderboard').style.display = 'block';
+  const landing = document.getElementById('landing');
+  if (landing) landing.style.display = 'none';
+  const panel = document.getElementById('uiPanel');
+  if (panel) panel.style.display = 'block';
+  const lb = document.getElementById('leaderboard');
+  if (lb) lb.style.display = 'block';
 }
 
 function toggleUI() {
@@ -847,6 +850,14 @@ updateDroneUI();
 // Force landing visible on load
 document.getElementById('landing').style.display = 'flex';
 document.getElementById('uiPanel').style.display = 'none';
+
+// Reliable Enter button handler
+const enterBtn = document.getElementById('enterBtn');
+if (enterBtn) {
+  enterBtn.addEventListener('click', enterGame);
+  enterBtn.addEventListener('touchend', function(e) { e.preventDefault(); enterGame(); }, { passive: false });
+}
+
 requestAnimationFrame(gameLoop);
 
 // Extra touch support for Start button on mobile
