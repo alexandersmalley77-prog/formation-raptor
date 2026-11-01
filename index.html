@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- Copyright (c) 2026 Alexander Smalley. All rights reserved. See LICENSE. -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -17,14 +18,25 @@ button { margin:2px; padding:6px 10px; background:rgba(47,232,196,0.1); color:#2
 #touchHint { position:absolute; bottom:4px; left:50%; transform:translateX(-50%); color:#2fe8c4; font-size:8px; text-align:center; }
 #powerup { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(4,10,24,0.94); border:1px solid #2fe8c4; box-shadow:0 0 18px rgba(47,232,196,0.3); padding:20px; z-index:20; text-align:center; }
 #powerup button { display:block; width:220px; margin:10px auto; font-size:18px; }
-#upgrades { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(4,10,24,0.94); border:1px solid #2fe8c4; box-shadow:0 0 18px rgba(47,232,196,0.3); padding:20px; z-index:25; text-align:center; min-width:260px; }
-#upgrades button { display:block; width:220px; margin:8px auto; font-size:16px; }
 #scores { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(4,10,24,0.94); border:1px solid #2fe8c4; box-shadow:0 0 18px rgba(47,232,196,0.3); padding:20px; z-index:30; text-align:center; min-width:260px; }
 #scores button { display:block; width:220px; margin:10px auto; font-size:16px; }
 #drones { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(4,10,24,0.94); border:1px solid #2fe8c4; box-shadow:0 0 18px rgba(47,232,196,0.3); padding:20px; z-index:10000; text-align:center; min-width:260px; }
 #drones button { display:block; width:220px; margin:8px auto; font-size:16px; }
+#shop { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:min(94vw,420px); max-height:88vh; overflow-y:auto; box-sizing:border-box; background:rgba(4,10,24,0.96); border:1px solid #2fe8c4; box-shadow:0 0 18px rgba(47,232,196,0.35); padding:14px; z-index:10000; text-align:center; -webkit-overflow-scrolling:touch; touch-action:pan-y; }
+#shop h2 { margin:0 0 4px; font-size:22px; letter-spacing:3px; color:#2fe8c4; text-shadow:0 0 8px rgba(47,232,196,0.8); }
+#shopCoins { color:#ffe94a; text-shadow:0 0 6px rgba(255,233,74,0.6); font-size:16px; margin-bottom:8px; }
+.shopItem { display:flex; align-items:center; gap:8px; text-align:left; border:1px solid rgba(47,232,196,0.45); box-shadow:inset 0 0 10px rgba(47,232,196,0.12); padding:8px; margin:8px 0; }
+.shopItem .info { flex:1; min-width:0; }
+.shopItem .name { font-size:15px; color:#e8fffa; }
+.shopItem .lvl { font-size:11px; color:#2fe8c4; opacity:0.85; }
+.shopItem .eff { font-size:12px; color:#9fdcff; margin-top:2px; }
+.shopItem .pips { font-size:10px; letter-spacing:1px; color:#2fe8c4; }
+.shopItem button { flex:none; min-width:92px; min-height:44px; margin:0; font-size:14px; color:#ffe94a; border-color:#ffe94a; box-shadow:0 0 8px rgba(255,233,74,0.35); background:rgba(255,233,74,0.08); }
+.shopItem button:disabled { color:#5a6b74; border-color:#33424a; box-shadow:none; background:rgba(40,50,60,0.25); cursor:default; }
+#shop .wide { display:block; width:100%; min-height:44px; margin:8px 0 0; font-size:16px; }
+#scores button { min-height:44px; }
+#copyright { position:absolute; bottom:10px; left:0; right:0; text-align:center; font-size:10px; color:#2fe8c4; opacity:0.35; pointer-events:none; letter-spacing:1px; }
 #scoreList { text-align:left; margin:10px 0; font-size:14px; }
-#leaderboard { position:absolute; top:50px; left:4px; color:#2fe8c4; font-size:8px; z-index:100; background:rgba(4,10,24,0.6); border:1px solid #2fe8c4; padding:2px; min-width:80px; max-height:70px; overflow-y:auto; display:none; }
 #controls { position:absolute; top:40px; right:4px; background:rgba(4,10,24,0.92); border:1px solid #2fe8c4; padding:2px; z-index:15; font-size:8px; max-height:30vh; overflow-y:auto; width:90px; display:none; }
 #controls label { display:block; margin:6px 0 2px; }
 #controls input[type=range] { width:100%; }
@@ -38,6 +50,7 @@ button { margin:2px; padding:6px 10px; background:rgba(47,232,196,0.1); color:#2
   <button id="enterBtn" onclick="enterGame()" style="font-size:18px; padding:12px 24px;">Enter</button>
   <button id="landingStartBtn" style="font-size:18px; padding:12px 24px;">&#9654; Start Run</button>
   <button id="dronesBtn" onclick="window.toggleDrones=toggleDrones; toggleDrones();">Drones</button>
+  <div id="copyright">&copy; 2026 Alexander Smalley</div>
 </div>
 <div id="ui">
   <button onclick="toggleUI()">☰ Options</button>
@@ -46,15 +59,11 @@ button { margin:2px; padding:6px 10px; background:rgba(47,232,196,0.1); color:#2
   <br><button id="startBtn" onclick="startRun()">Start Run (1 Energy)</button>
   <br><button onclick="toggleMode()">Mode: <span id="mode">Multi-Group</span></button>
   <button onclick="togglePause()">Pause</button>
-  <button onclick="toggleUpgrades()">Upgrades</button>
+  <button id="shopBtn" onclick="toggleShop()">Shop</button>
   <button onclick="document.getElementById('controls').style.display=document.getElementById('controls').style.display==='block'?'none':'block'">Tune</button>
   <button onclick="toggleDrones()">Drones</button>
-  <button onclick="showScores()">Scores</button>
+  <button id="lbBtn" onclick="showScores()">Leaderboard</button>
   </div>
-</div>
-<div id="leaderboard">
-  <div style="font-size:16px; margin-bottom:6px; border-bottom:1px solid #2fe8c4;">Leaderboard</div>
-  <div id="homeScores">No scores yet</div>
 </div>
 <div id="touchHint">Touch & drag anywhere to move</div>
 <div id="controls">
@@ -81,19 +90,18 @@ button { margin:2px; padding:6px 10px; background:rgba(47,232,196,0.1); color:#2
   <button id="p2" onclick="pickPower(1)"></button>
   <button id="p3" onclick="pickPower(2)"></button>
 </div>
-<div id="upgrades">
-  <div style="font-size:20px; margin-bottom:10px;">Permanent Upgrades</div>
-  <div>Coins: <span id="upgCoins">0</span></div>
-  <button id="btnDmg" onclick="buyDamage()">+5 Damage (100 coins)</button>
-  <button id="btnFR" onclick="buyFireRate()">+Fire Rate (100 coins)</button>
-  <button id="btnSpd" onclick="buySpeed()">+1 Speed (100 coins)</button>
-  <button id="btnHP" onclick="buyMaxHP()">+20 Max HP (100 coins)</button>
-  <button onclick="toggleUpgrades()">Close</button>
+<div id="shop">
+  <h2>SHOP</h2>
+  <div id="shopCoins">&#11042; 0 coins</div>
+  <div style="font-size:11px; opacity:0.75;">Permanent upgrades, paid with coins earned in runs. Applied at the start of every run.</div>
+  <div id="shopList"></div>
+  <button class="wide" onclick="toggleShop(); toggleDrones();">Drone Bay (drone model) &rarr;</button>
+  <button class="wide" id="shopBack" onclick="toggleShop()">Back</button>
 </div>
 <div id="scores">
-  <div style="font-size:20px; margin-bottom:10px;">Top Scores</div>
+  <div style="font-size:20px; margin-bottom:10px;">Leaderboard</div>
   <div id="scoreList"></div>
-  <button onclick="document.getElementById('scores').style.display='none'">Close</button>
+  <button id="lbBack" onclick="document.getElementById('scores').style.display='none'">Back</button>
 </div>
 <div id="drones">
   <div style="font-size:20px; margin-bottom:10px;">Drone Bay</div>
@@ -111,7 +119,7 @@ const W = 480, H = 720; // logical size; backing store is scaled by RES (see Art
 
 // ===================== Persistent save (one object) =====================
 const SAVE_KEY = 'fr_save_v1';
-const MAX_ENERGY = 10;
+const MAX_ENERGY = 10; // base; Shop 'Max Energy' adds to it (see maxEnergy())
 const ENERGY_REGEN_MS = 5 * 60 * 1000; // +1 energy every 5 minutes
 function loadSave() {
   let s = null;
@@ -120,13 +128,14 @@ function loadSave() {
   const legacyDrone = parseInt(localStorage.getItem('fr_droneLevel') || '1') || 1; // migrate old key
   return {
     coins: Number.isFinite(s.coins) ? s.coins : 0,
-    upg: Object.assign({ dmg: 0, fr: 0, spd: 0, hp: 0 }, s.upg || {}),
+    upg: Object.assign({ dmg: 0, fr: 0, spd: 0, hp: 0, en: 0, drn: 0 }, s.upg || {}),
     droneLevel: s.droneLevel || legacyDrone,
     energy: Number.isFinite(s.energy) ? s.energy : MAX_ENERGY,
     energyTs: s.energyTs || Date.now()
   };
 }
 let save = loadSave();
+function maxEnergy() { return MAX_ENERGY + (save.upg.en || 0); }
 let energy = save.energy, coins = save.coins, droneLevel = save.droneLevel;
 function persist() {
   save.coins = coins; save.droneLevel = droneLevel; save.energy = energy;
@@ -134,17 +143,17 @@ function persist() {
 }
 function tickEnergy() {
   const now = Date.now();
-  if (energy >= MAX_ENERGY) { save.energyTs = now; return; }
+  if (energy >= maxEnergy()) { save.energyTs = now; return; }
   const gained = Math.floor((now - save.energyTs) / ENERGY_REGEN_MS);
   if (gained > 0) {
-    energy = Math.min(MAX_ENERGY, energy + gained);
-    save.energyTs = energy >= MAX_ENERGY ? now : save.energyTs + gained * ENERGY_REGEN_MS;
+    energy = Math.min(maxEnergy(), energy + gained);
+    save.energyTs = energy >= maxEnergy() ? now : save.energyTs + gained * ENERGY_REGEN_MS;
     persist();
   }
   updateUI();
 }
 function energyEta() {
-  if (energy >= MAX_ENERGY) return '';
+  if (energy >= maxEnergy()) return '';
   const s = Math.max(0, Math.ceil((ENERGY_REGEN_MS - (Date.now() - save.energyTs)) / 1000));
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
@@ -610,8 +619,6 @@ function enterGame() {
   if (landing) { landing.style.display = 'none'; landing.style.visibility = 'hidden'; }
   const panel = document.getElementById('uiPanel');
   if (panel) panel.style.display = 'block';
-  const lb = document.getElementById('leaderboard');
-  if (lb) lb.style.display = 'block';
   document.getElementById('ui').style.zIndex = '1000';
 }
 document.addEventListener('keydown', function(e) {
@@ -619,18 +626,15 @@ document.addEventListener('keydown', function(e) {
 });
 function toggleUI() {
   const panel = document.getElementById('uiPanel');
-  const lb = document.getElementById('leaderboard');
   const open = panel.style.display !== 'none';
   panel.style.display = open ? 'none' : 'block';
-  if (lb) lb.style.display = open ? 'none' : 'block';
 }
 function collapseOptions() {
   document.getElementById('uiPanel').style.display = 'none';
-  const lb = document.getElementById('leaderboard'); if (lb) lb.style.display = 'none';
   document.getElementById('controls').style.display = 'none';
 }
 function updateUI() {
-  document.getElementById('energy').textContent = energy + '/' + MAX_ENERGY + (energy < MAX_ENERGY ? ' (+1 in ' + energyEta() + ')' : '');
+  document.getElementById('energy').textContent = energy + '/' + maxEnergy() + (energy < maxEnergy() ? ' (+1 in ' + energyEta() + ')' : '');
   document.getElementById('coins').textContent = coins;
   document.getElementById('wave').textContent = wave;
   document.getElementById('mode').textContent = mode === 'multi' ? 'Multi-Group' : 'Single Durable';
@@ -661,41 +665,65 @@ function saveScore() {
   updateHomeScores();
 }
 
-// Permanent upgrades (persisted in save.upg)
+// ===================== Shop (permanent upgrades, coins only; persisted in save.upg) =====================
+// cost(level n) = base * growth^n, rounded to 5. Effects are applied in startRun via baseStats()/maxEnergy()/upg.drn.
 const UPGRADES = {
-  dmg: { base: 100, step: 50, max: 20, label: n => '+5 Damage', apply: () => { damage += 5; } },
-  fr:  { base: 100, step: 60, max: 4,  label: n => '+Fire Rate', apply: () => { fireRate = Math.max(50, fireRate - 15); } },
-  spd: { base: 100, step: 50, max: 5,  label: n => '+1 Speed', apply: () => { player.speed += 1; } },
-  hp:  { base: 100, step: 70, max: 10, label: n => '+20 Max HP', apply: () => { player.maxHp += 20; player.hp += 20; } }
+  dmg: { name: 'Damage',      base: 120, growth: 1.30, max: 20, eff: n => 'Start damage ' + (36 + n * 5) },
+  fr:  { name: 'Fire Rate',   base: 150, growth: 1.60, max: 4,  eff: n => 'Shot every ' + Math.max(50, 110 - n * 15) + ' ms' },
+  hp:  { name: 'Max HP',      base: 120, growth: 1.35, max: 10, eff: n => 'Start HP ' + (100 + n * 20) },
+  spd: { name: 'Speed',       base: 100, growth: 1.40, max: 5,  eff: n => 'Move speed ' + (5 + n) },
+  en:  { name: 'Max Energy',  base: 200, growth: 1.50, max: 5,  eff: n => 'Energy cap ' + (MAX_ENERGY + n) },
+  drn: { name: 'Drone Slots', base: 300, growth: 2.00, max: 2,  eff: n => 'Start with ' + (2 + n) + ' drones' }
 };
-const UPG_BTN = { dmg: 'btnDmg', fr: 'btnFR', spd: 'btnSpd', hp: 'btnHP' };
-function upgCost(k) { return UPGRADES[k].base + save.upg[k] * UPGRADES[k].step; }
+const REFILL_COST = 150; // consumable: refill energy to the cap
+function upgCost(k) { const u = UPGRADES[k]; return Math.round(u.base * Math.pow(u.growth, save.upg[k] || 0) / 5) * 5; }
 function buyUpgrade(k) {
   const u = UPGRADES[k], cost = upgCost(k);
-  if (save.upg[k] >= u.max || coins < cost) return;
-  coins -= cost; save.upg[k]++;
-  if (running) u.apply(); // also takes effect in the current run
-  persist(); updateUI(); updateUpgradeButtons();
+  if ((save.upg[k] || 0) >= u.max || coins < cost) return false;
+  coins -= cost; save.upg[k] = (save.upg[k] || 0) + 1;
+  persist(); updateUI(); renderShop();
+  return true; // takes effect from the next run start
 }
-function buyDamage() { buyUpgrade('dmg'); }
-function buyFireRate() { buyUpgrade('fr'); }
-function buySpeed() { buyUpgrade('spd'); }
-function buyMaxHP() { buyUpgrade('hp'); }
-function updateUpgradeButtons() {
-  document.getElementById('upgCoins').textContent = coins;
+function buyRefill() {
+  tickEnergy();
+  if (energy >= maxEnergy() || coins < REFILL_COST) return false;
+  coins -= REFILL_COST; energy = maxEnergy(); save.energyTs = Date.now();
+  persist(); updateUI(); renderShop();
+  return true;
+}
+// legacy names (older buttons/tests)
+function buyDamage() { return buyUpgrade('dmg'); }
+function buyFireRate() { return buyUpgrade('fr'); }
+function buySpeed() { return buyUpgrade('spd'); }
+function buyMaxHP() { return buyUpgrade('hp'); }
+function renderShop() {
+  const list = document.getElementById('shopList'); if (!list) return;
+  document.getElementById('shopCoins').textContent = '\u2B22 ' + coins + ' coins';
+  let html = '';
   Object.keys(UPGRADES).forEach(k => {
-    const u = UPGRADES[k], n = save.upg[k];
-    document.getElementById(UPG_BTN[k]).textContent = u.label(n) + ' [' + n + '/' + u.max + '] ' + (n >= u.max ? 'MAX' : '(' + upgCost(k) + ' coins)');
+    const u = UPGRADES[k], n = save.upg[k] || 0, maxed = n >= u.max, cost = upgCost(k);
+    const pips = u.max <= 10 ? '\u25A0'.repeat(n) + '\u25A1'.repeat(u.max - n) : '';
+    html += '<div class="shopItem" data-k="' + k + '"><div class="info"><div class="name">' + u.name + '</div>' +
+      '<div class="lvl">Level ' + n + '/' + u.max + (pips ? ' <span class="pips">' + pips + '</span>' : '') + '</div>' +
+      '<div class="eff">Now: ' + u.eff(n) + '</div>' + (maxed ? '' : '<div class="eff" style="opacity:0.7">Next: ' + u.eff(n + 1) + '</div>') + '</div>' +
+      '<button id="buy_' + k + '" onclick="buyUpgrade(\'' + k + '\')"' + (maxed || coins < cost ? ' disabled' : '') + '>' +
+      (maxed ? 'MAXED' : cost + ' \u2B22') + '</button></div>';
   });
+  const full = energy >= maxEnergy();
+  html += '<div class="shopItem" data-k="refill"><div class="info"><div class="name">Energy Refill</div>' +
+    '<div class="lvl">One-time purchase</div><div class="eff">Energy ' + energy + '/' + maxEnergy() + (full ? ' (full)' : ' \u2192 ' + maxEnergy()) + '</div></div>' +
+    '<button id="buy_refill" onclick="buyRefill()"' + (full || coins < REFILL_COST ? ' disabled' : '') + '>' + (full ? 'FULL' : REFILL_COST + ' \u2B22') + '</button></div>';
+  list.innerHTML = html;
 }
-function toggleUpgrades() {
-  const el = document.getElementById('upgrades');
+function toggleShop() {
+  const el = document.getElementById('shop');
   const open = el.style.display === 'block';
   el.style.display = open ? 'none' : 'block';
-  updateUpgradeButtons();
+  if (!open) { tickEnergy(); renderShop(); }
   if (!open && running) paused = true;
-  if (open) paused = false;
+  if (open && running) paused = false;
 }
+function toggleUpgrades() { toggleShop(); } // legacy name
 
 // ===================== Run flow =====================
 function startFromLanding() { enterGame(); startRun(); }
@@ -703,7 +731,7 @@ function startRun() {
   if (running) return;
   tickEnergy();
   if (energy <= 0) { banner = { text: 'No energy — +1 in ' + energyEta(), t: 150 }; return; }
-  if (energy >= MAX_ENERGY) save.energyTs = Date.now();
+  if (energy >= maxEnergy()) save.energyTs = Date.now();
   energy--;
   collapseOptions();
   state = 'running'; running = true; picking = false; paused = false;
@@ -715,7 +743,7 @@ function startRun() {
   damage = st.damage; fireRate = st.fireRate; player.speed = st.speed;
   player.maxHp = st.maxHp; player.hp = st.maxHp; multiShot = 1;
   player.x = W / 2 - player.w / 2; player.y = PLAY.y + PLAY.h - 60;
-  drones = []; addDrone(); addDrone();
+  drones = []; for (let i = 0; i < 2 + (save.upg.drn || 0); i++) addDrone(); // Shop: Drone Slots
   document.getElementById('powerup').style.display = 'none';
   syncTune();
   spawnWave();
@@ -732,7 +760,6 @@ function endRun() {
 function backToMenu() {
   state = 'idle'; running = false;
   document.getElementById('uiPanel').style.display = 'block';
-  const lb = document.getElementById('leaderboard'); if (lb) lb.style.display = 'block';
   updateUI();
 }
 
@@ -939,7 +966,7 @@ function killBoss() {
   burst(b.x + b.w * 0.75, b.y + b.h / 2, '#ff8a1a', 30, true);
   const c = b.isBig ? 100 : 40;
   coins += c; runCoins += c; runScore += b.isBig ? 1000 : 400;
-  energy = Math.min(MAX_ENERGY, energy + 1);
+  energy = Math.min(maxEnergy(), energy + 1);
   boss = null;
   enemies.forEach(e => burst(e.x + e.w / 2, e.y + e.h / 2, ENEMY_COL[e.type], 6));
   enemies = []; enemyBullets = [];
@@ -1334,7 +1361,7 @@ function renderGameOver() {
   ctx.fillText('Coins earned: ' + s.coins + '  (bank ' + coins + ')', W / 2, 330);
   ctx.fillText('Time: ' + s.time + 's   Best: ' + s.best, W / 2, 360);
   ctx.font = '13px monospace';
-  ctx.fillText('Energy ' + energy + '/' + MAX_ENERGY + (energy < MAX_ENERGY ? '  (+1 in ' + energyEta() + ')' : ''), W / 2, 395);
+  ctx.fillText('Energy ' + energy + '/' + maxEnergy() + (energy < maxEnergy() ? '  (+1 in ' + energyEta() + ')' : ''), W / 2, 395);
   const r = GO_BTNS.retry, m = GO_BTNS.menu;
   ctx.fillStyle = energy > 0 ? 'rgba(47,232,196,0.15)' : '#222'; ctx.fillRect(r.x, r.y, r.w, r.h); ctx.strokeRect(r.x, r.y, r.w, r.h);
   ctx.fillStyle = PLAYER_COL; ctx.font = 'bold 20px monospace'; ctx.fillText(energy > 0 ? 'RETRY (1 Energy)' : 'No Energy', W / 2, r.y + 33);
@@ -1357,7 +1384,7 @@ function renderIdle() {
   ctx.font = '18px monospace';
   ctx.fillText(energy > 0 ? 'Tap here to start a run' : 'No energy, +1 in ' + energyEta(), W / 2, 310);
   ctx.font = '13px monospace';
-  ctx.fillText('Energy ' + energy + '/' + MAX_ENERGY + '   Coins ' + coins + '   Drone: ' + droneNames[droneLevel - 1], W / 2, 340);
+  ctx.fillText('Energy ' + energy + '/' + maxEnergy() + '   Coins ' + coins + '   Drone: ' + droneNames[droneLevel - 1], W / 2, 340);
   ctx.fillText('Drag anywhere to fly. Auto-fire is always on.', W / 2, 365);
   if (banner && banner.t > 0) { ctx.fillStyle = '#ff0'; ctx.fillText(banner.text, W / 2, 395); }
   ctx.textAlign = 'left';
@@ -1481,7 +1508,7 @@ function canvasTap(p) {
     return true;
   }
   if (state === 'idle') { startRun(); return true; }
-  if (paused && !document.getElementById('upgrades').style.display.includes('block')) { paused = false; return true; }
+  if (paused && !document.getElementById('shop').style.display.includes('block')) { paused = false; return true; }
   return false;
 }
 function beginDrag(e) {
