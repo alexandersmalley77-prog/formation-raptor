@@ -10,7 +10,7 @@ canvas { display:block; position:absolute; top:0; left:0; background:#001122; bo
 #ui { position:absolute; top:4px; left:4px; color:#0f0; font-size:12px; z-index:100; max-width:50vw; }
 #uiPanel { display:none; }
 button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1px solid #0f0; cursor:pointer; font-size:13px; touch-action:manipulation; position:relative; z-index:101; }
-#landing { position:absolute; top:0; left:0; width:100vw; height:100vh; background:#001122; z-index:200; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+#landing { position:fixed !important; top:0 !important; left:0 !important; width:100vw !important; height:100vh !important; background:#001122 !important; z-index:9999 !important; display:flex !important; flex-direction:column; align-items:center; justify-content:center; }
 #droneGraphic { width:120px; height:70px; position:relative; margin-bottom:20px; }
 #droneBody { width:70px; height:28px; background:#0af; position:absolute; top:20px; left:25px; border-radius:6px; border:2px solid #0ff; }
 #droneWingL { width:30px; height:10px; background:#0ff; position:absolute; top:10px; left:0; border-radius:3px; }
@@ -25,7 +25,7 @@ button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1p
 #upgrades button { display:block; width:220px; margin:8px auto; font-size:16px; }
 #scores { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,20,0,0.95); border:2px solid #0f0; padding:20px; z-index:30; text-align:center; min-width:260px; }
 #scores button { display:block; width:220px; margin:10px auto; font-size:16px; }
-#drones { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,20,0,0.95); border:2px solid #0f0; padding:20px; z-index:300; text-align:center; min-width:260px; }
+#drones { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,20,0,0.95); border:2px solid #0f0; padding:20px; z-index:10000; text-align:center; min-width:260px; }
 #drones button { display:block; width:220px; margin:8px auto; font-size:16px; }
 #scoreList { text-align:left; margin:10px 0; font-size:14px; }
 #leaderboard { position:absolute; top:50px; left:4px; color:#0f0; font-size:8px; z-index:100; background:rgba(0,20,0,0.6); border:1px solid #0f0; padding:2px; min-width:80px; max-height:70px; overflow-y:auto; display:none; }
@@ -36,7 +36,7 @@ button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1p
 </style>
 </head>
 <body>
-<div id="landing">
+<div id="landing" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:#001122;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;">
   <div id="droneGraphic">
     <div id="droneProp"></div>
     <div id="droneWingL"></div>
@@ -850,6 +850,9 @@ canvas.addEventListener('mouseup', () => { touchX = null; touchY = null; });
 updateUI();
 updateHomeScores();
 updateDroneUI();
+// Force landing visible on load
+document.getElementById('landing').style.display = 'flex';
+document.getElementById('uiPanel').style.display = 'none';
 requestAnimationFrame(gameLoop);
 
 // Extra touch support for Start button on mobile
