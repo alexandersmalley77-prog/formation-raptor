@@ -9,15 +9,693 @@ body { margin:0; background:#000; color:#0f0; font-family:monospace; overflow:hi
 canvas { display:block; position:absolute; top:0; left:0; background:#001122; border:2px solid #0f0; width:100vw; height:100vh; max-width:100vw; max-height:100vh; object-fit:contain; z-index:1; }
 #ui { position:absolute; top:10px; left:10px; color:#0f0; font-size:14px; z-index:100; }
 button { margin:5px; padding:12px 16px; background:#003300; color:#0f0; border:1px solid #0f0; cursor:pointer; font-size:16px; touch-action:manipulation; position:relative; z-index:101; }
+#touchHint { position:absolute; bottom:20px; left:50%; transform:translateX(-50%); color:#0f0; font-size:12px; text-align:center; }
+#powerup { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,20,0,0.95); border:2px solid #0f0; padding:20px; z-index:20; text-align:center; }
+#powerup button { display:block; width:220px; margin:10px auto; font-size:18px; }
+#upgrades { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,20,0,0.95); border:2px solid #0f0; padding:20px; z-index:25; text-align:center; min-width:260px; }
+#upgrades button { display:block; width:220px; margin:8px auto; font-size:16px; }
+#controls { position:absolute; top:70px; right:8px; background:rgba(0,20,0,0.92); border:1px solid #0f0; padding:8px; z-index:15; font-size:11px; max-height:60vh; overflow-y:auto; width:160px; display:none; }
+#controls label { display:block; margin:6px 0 2px; }
+#controls input[type=range] { width:100%; }
+#controls .val { float:right; color:#0f0; }
 </style>
 </head>
 <body>
 <div id="ui">
-  <button id="startBtn" onclick="alert('Works')">Start Run</button>
+  Energy: <span id="energy">10</span> | Coins: <span id="coins">0</span> | Wave: <span id="wave">1</span>
+  <br><button id="startBtn" onclick="startRun()">Start Run (1 Energy)</button>
+  <button onclick="upgradeDamage()">Upgrade Damage (+10 coins)</button>
+  <br><button onclick="toggleMode()">Mode: <span id="mode">Multi-Group</span></button>
+  <button onclick="togglePause()">Pause</button>
+  <button onclick="toggleUpgrades()">Upgrades</button>
+  <button onclick="document.getElementById('controls').style.display=document.getElementById('controls').style.display==='block'?'none':'block'">Tune</button>
+</div>
+<div id="touchHint">Touch & drag anywhere to move</div>
+<div id="controls">
+  <strong>Live Adjustments</strong><br>
+  <label>Damage <span class="val" id="dmgVal">36</span></label>
+  <input type="range" id="dmgSlider" min="10" max="100" value="36" oninput="setDamage(this.value)">
+  <label>Fire Rate (ms) <span class="val" id="frVal">110</span></label>
+  <input type="range" id="frSlider" min="50" max="300" value="110" oninput="setFireRate(this.value)">
+  <label>Player Speed <span class="val" id="spdVal">5</span></label>
+  <input type="range" id="spdSlider" min="2" max="12" value="5" oninput="setSpeed(this.value)">
+  <label>Player HP <span class="val" id="hpVal">100</span></label>
+  <input type="range" id="hpSlider" min="50" max="300" value="100" oninput="setHP(this.value)">
+  <label>Enemy HP Scale <span class="val" id="ehpVal">1</span></label>
+  <input type="range" id="ehpSlider" min="0.5" max="3" step="0.1" value="1" oninput="setEnemyHP(this.value)">
+  <label>Contact Dmg Scale <span class="val" id="cdmgVal">1</span></label>
+  <input type="range" id="cdmgSlider" min="0.5" max="3" step="0.1" value="1" oninput="setContactDmg(this.value)">
+  <label>Enemy Proj Scale <span class="val" id="epdmgVal">1</span></label>
+  <input type="range" id="epdmgSlider" min="0.5" max="3" step="0.1" value="1" oninput="setEnemyProj(this.value)">
+  <button onclick="document.getElementById('controls').style.display='none'">Hide</button>
+</div>
+<div id="powerup">
+  <div style="font-size:20px; margin-bottom:10px;">Wave Clear! Pick a Power-Up</div>
+  <button id="p1" onclick="pickPower(0)"></button>
+  <button id="p2" onclick="pickPower(1)"></button>
+  <button id="p3" onclick="pickPower(2)"></button>
+</div>
+<div id="upgrades">
+  <div style="font-size:20px; margin-bottom:10px;">Permanent Upgrades</div>
+  <div>Coins: <span id="upgCoins">0</span></div>
+  <button id="btnDmg" onclick="buyDamage()">+5 Damage (10 coins)</button>
+  <button id="btnFR" onclick="buyFireRate()">+Fire Rate (15 coins)</button>
+  <button id="btnSpd" onclick="buySpeed()">+1 Speed (12 coins)</button>
+  <button id="btnHP" onclick="buyMaxHP()">+20 Max HP (20 coins)</button>
+  <button onclick="toggleUpgrades()">Close</button>
 </div>
 <canvas id="game" width="480" height="720"></canvas>
 <script>
-console.log('loaded');
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let energy = 10, coins = 0, wave = 1, damage = 36, running = false;
+let player = { x: 240, y: 600, w: 30, h: 30, speed: 5, hp: 100, maxHp: 100 };
+let bullets = [], enemies = [], boss = null, keys = {};
+let enemyBullets = [];
+let lastShot = 0;
+let touchX = null;
+let touchY = null;
+let mode = 'multi';
+let drones = [];
+let fireRate = 100;
+let multiShot = 1;
+let picking = false;
+let paused = false;
+let currentOptions = [];
+let invuln = 0;
+let shieldBubbles = [];
+let healthBubbles = [];
+let hasShield = false;
+let shieldTimer = 0;
+let enemyHPScale = 1;
+let contactDmgScale = 1;
+let enemyProjScale = 1;
+let dmgBuys = 0, frBuys = 0, spdBuys = 0, hpBuys = 0;
+
+function setDamage(v) { damage = parseInt(v); document.getElementById('dmgVal').textContent = v; }
+function setFireRate(v) { fireRate = parseInt(v); document.getElementById('frVal').textContent = v; }
+function setSpeed(v) { player.speed = parseInt(v); document.getElementById('spdVal').textContent = v; }
+function setHP(v) { player.maxHp = parseInt(v); player.hp = Math.min(player.hp, player.maxHp); document.getElementById('hpVal').textContent = v; }
+function setEnemyHP(v) { enemyHPScale = parseFloat(v); document.getElementById('ehpVal').textContent = v; }
+function setContactDmg(v) { contactDmgScale = parseFloat(v); document.getElementById('cdmgVal').textContent = v; }
+function setEnemyProj(v) { enemyProjScale = parseFloat(v); document.getElementById('epdmgVal').textContent = v; }
+
+const powerups = [
+  { name: "+Damage", apply: () => { damage += 15; } },
+  { name: "+Fire Rate", apply: () => { fireRate = Math.max(50, fireRate - 20); } },
+  { name: "Split Shot", apply: () => { multiShot = Math.max(multiShot, 2); } },
+  { name: "Dual Fire", apply: () => { multiShot += 1; } },
+  { name: "+1 Projectile", apply: () => { multiShot++; } },
+  { name: "Drone Boost", apply: () => { drones.push({ offsetX: 0, offsetY: -40, lastShot: 0 }); } },
+  { name: "+Speed", apply: () => { player.speed += 1; } }
+];
+
+function updateUI() {
+  document.getElementById('energy').textContent = energy;
+  document.getElementById('coins').textContent = coins;
+  document.getElementById('wave').textContent = wave;
+  document.getElementById('mode').textContent = mode === 'multi' ? 'Multi-Group' : 'Single Durable';
+}
+
+function drawHealthBar() {
+  const barW = 120, barH = 10;
+  const x = 10, y = canvas.height - 30;
+  ctx.fillStyle = '#300';
+  ctx.fillRect(x, y, barW, barH);
+  ctx.fillStyle = '#0f0';
+  ctx.fillRect(x, y, barW * (player.hp / player.maxHp), barH);
+  ctx.strokeStyle = '#0f0';
+  ctx.strokeRect(x, y, barW, barH);
+  ctx.fillStyle = '#0f0';
+  ctx.font = '12px monospace';
+  ctx.fillText('HP: ' + Math.ceil(player.hp), x, y - 4);
+}
+
+function toggleMode() {
+  mode = mode === 'multi' ? 'single' : 'multi';
+  updateUI();
+}
+
+function togglePause() {
+  if (!running) return;
+  paused = !paused;
+  event.target.textContent = paused ? 'Resume' : 'Pause';
+}
+
+function startRun() {
+  if (energy <= 0 || running) return;
+  energy--;
+  running = true;
+  picking = false;
+  paused = false;
+  enemies = [];
+  bullets = [];
+  enemyBullets = [];
+  shieldBubbles = [];
+  healthBubbles = [];
+  hasShield = false;
+  wave = 1;
+  damage = 36;
+  fireRate = 110;
+  multiShot = 1;
+  player.speed = 5;
+  player.hp = player.maxHp;
+  drones = [
+    { offsetX: -40, offsetY: -20, lastShot: 0 },
+    { offsetX: 40, offsetY: -20, lastShot: 0 }
+  ];
+  document.getElementById('powerup').style.display = 'none';
+  spawnWave();
+  updateUI();
+}
+
+function toggleUpgrades() {
+  const el = document.getElementById('upgrades');
+  const open = el.style.display === 'block';
+  el.style.display = open ? 'none' : 'block';
+  document.getElementById('upgCoins').textContent = coins;
+  updateUpgradeButtons();
+  if (!open && running) paused = true;
+  if (open) paused = false;
+}
+
+function updateUpgradeButtons() {
+  document.getElementById('btnDmg').textContent = '+5 Damage (' + (100 + dmgBuys * 50) + ' coins)';
+  document.getElementById('btnFR').textContent = '+Fire Rate (' + (100 + frBuys * 60) + ' coins)';
+  document.getElementById('btnSpd').textContent = '+1 Speed (' + (100 + spdBuys * 50) + ' coins)';
+  document.getElementById('btnHP').textContent = '+20 Max HP (' + (100 + hpBuys * 70) + ' coins)';
+}
+
+function buyDamage() {
+  const cost = 100 + dmgBuys * 50;
+  if (coins >= cost) { coins -= cost; damage += 5; dmgBuys++; updateUI(); document.getElementById('upgCoins').textContent = coins; updateUpgradeButtons(); }
+}
+function buyFireRate() {
+  const cost = 100 + frBuys * 60;
+  if (coins >= cost) { coins -= cost; fireRate = Math.max(50, fireRate - 15); frBuys++; updateUI(); document.getElementById('upgCoins').textContent = coins; updateUpgradeButtons(); }
+}
+function buySpeed() {
+  const cost = 100 + spdBuys * 50;
+  if (coins >= cost) { coins -= cost; player.speed += 1; spdBuys++; updateUI(); document.getElementById('upgCoins').textContent = coins; updateUpgradeButtons(); }
+}
+function buyMaxHP() {
+  const cost = 100 + hpBuys * 70;
+  if (coins >= cost) { coins -= cost; player.maxHp += 20; player.hp += 20; hpBuys++; updateUI(); document.getElementById('upgCoins').textContent = coins; updateUpgradeButtons(); }
+}
+
+function showPowerups() {
+  picking = true;
+  currentOptions = [];
+  const pool = [...powerups];
+  for (let i = 0; i < 3; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    currentOptions.push(pool.splice(idx, 1)[0]);
+  }
+  document.getElementById('p1').textContent = currentOptions[0].name;
+  document.getElementById('p2').textContent = currentOptions[1].name;
+  document.getElementById('p3').textContent = currentOptions[2].name;
+  document.getElementById('powerup').style.display = 'block';
+}
+
+function pickPower(i) {
+  if (!picking) return;
+  currentOptions[i].apply();
+  picking = false;
+  document.getElementById('powerup').style.display = 'none';
+  wave++;
+  spawnWave();
+  updateUI();
+}
+
+function spawnWave() {
+  enemies = [];
+  const countScale = 16 + Math.floor(wave * 4);
+  const hpBase = (16 + wave * 5) * enemyHPScale;
+
+  if (mode === 'single') {
+    enemies.push({
+      x: 210, y: -120,
+      w: 90, h: 90,
+      vx: 0.15, vy: 0.4,
+      hp: 800 + wave * 150,
+      diving: false,
+      type: 'tank'
+    });
+    return;
+  }
+
+  const patterns = [
+    () => { // single column of normals
+      for (let i = 0; i < Math.floor(countScale * 1.0); i++) {
+        enemies.push({ x: 220, y: -50 - i * 22, w: 22, h: 22, vx: 0, vy: 0.7, hp: hpBase, diving: false, type: 'normal' });
+      }
+    },
+    () => { // sides with some chargers
+      for (let i = 0; i < Math.floor(countScale * 0.8); i++) {
+        const type = i % 4 === 0 ? 'charger' : 'normal';
+        enemies.push({ x: 60, y: -60 - i * 20, w: 22, h: 22, vx: 0, vy: 0.65, hp: hpBase, diving: false, type });
+        enemies.push({ x: 380, y: -60 - i * 20, w: 22, h: 22, vx: 0, vy: 0.65, hp: hpBase, diving: false, type });
+      }
+    },
+    () => { // V with shooters
+      for (let i = 0; i < Math.floor(countScale * 0.7); i++) {
+        const type = i % 3 === 0 ? 'shooter' : 'normal';
+        enemies.push({ x: 240 - i * 14, y: -50 - i * 18, w: 22, h: 22, vx: 0, vy: 0.7, hp: hpBase, diving: false, type });
+        enemies.push({ x: 240 + i * 14, y: -50 - i * 18, w: 22, h: 22, vx: 0, vy: 0.7, hp: hpBase, diving: false, type });
+      }
+    },
+    () => { // staggered tanks + normals
+      for (let g = 0; g < 4; g++) {
+        for (let i = 0; i < Math.ceil(countScale / 2.5); i++) {
+          const type = (g === 1 || g === 2) && i % 5 === 0 ? 'tank' : 'normal';
+          enemies.push({
+            x: 40 + g * 110,
+            y: -70 - i * 24 - g * 10,
+            w: type === 'tank' ? 32 : 22,
+            h: type === 'tank' ? 32 : 22,
+            vx: 0, vy: 0.6, hp: type === 'tank' ? hpBase * 2.5 : hpBase, diving: false, type
+          });
+        }
+      }
+    }
+  ];
+
+  const numPatterns = 3 + Math.floor(wave / 2);
+  for (let p = 0; p < numPatterns; p++) {
+    const fn = patterns[Math.floor(Math.random() * patterns.length)];
+    fn();
+  }
+
+  // Random mixed adds
+  const extras = 6 + Math.floor(wave * 2);
+  for (let i = 0; i < extras; i++) {
+    const types = ['normal', 'charger', 'shooter', 'tank'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    enemies.push({
+      x: 30 + Math.random() * 420,
+      y: -100 - Math.random() * 300,
+      w: type === 'tank' ? 30 : 20,
+      h: type === 'tank' ? 30 : 20,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: 0.5 + Math.random() * 0.3,
+      hp: type === 'tank' ? hpBase * 2 : hpBase - 5,
+      diving: false,
+      type
+    });
+  }
+
+  // On boss waves (5, 10, 15...), place boss in the middle of the formation
+  if (wave % 5 === 0 && wave > 0) {
+    // Clear a wider center gap so the boss sits in the middle
+    enemies = enemies.filter(e => Math.abs(e.x - 240) > 110 || e.y < -250);
+    spawnBoss();
+  }
+
+  // Health bubble every 2 waves
+  if (wave % 2 === 0 && wave > 0) {
+    healthBubbles.push({
+      x: 100 + Math.random() * 280,
+      y: -50,
+      w: 28, h: 28,
+      vy: 1.4,
+      heal: 25 + wave * 2
+    });
+  }
+}
+
+function spawnBoss() {
+  boss = {
+    x: 140, y: 60,
+    w: 200, h: 110,
+    hp: 350,
+    turrets: [
+      { x: 15, y: 35, hp: 50, active: true },
+      { x: 165, y: 35, hp: 50, active: true }
+    ]
+  };
+}
+
+function gameLoop(ts) {
+  if (!running || picking || paused) { requestAnimationFrame(gameLoop); return; }
+  ctx.fillStyle = '#001122';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // Prefer keyboard when keys are held; otherwise use mouse/touch drag
+  const usingKeys = keys['ArrowLeft'] || keys['a'] || keys['ArrowRight'] || keys['d'] || keys['ArrowUp'] || keys['w'] || keys['ArrowDown'] || keys['s'];
+  if (usingKeys) {
+    if (keys['ArrowLeft'] || keys['a']) player.x -= player.speed;
+    if (keys['ArrowRight'] || keys['d']) player.x += player.speed;
+    if (keys['ArrowUp'] || keys['w']) player.y -= player.speed;
+    if (keys['ArrowDown'] || keys['s']) player.y += player.speed;
+    touchX = null; touchY = null;
+  } else if (touchX !== null && touchY !== null) {
+    player.x = touchX - player.w / 2;
+    player.y = touchY - player.h / 2;
+  }
+  // Rectangle perimeter the player cannot move past (larger for phone)
+  const rectX = 30, rectY = canvas.height * 0.32, rectW = 420, rectH = 380;
+  player.x = Math.max(rectX, Math.min(rectX + rectW - player.w, player.x));
+  player.y = Math.max(rectY, Math.min(rectY + rectH - player.h, player.y));
+
+  // Draw the movement rectangle perimeter
+  ctx.strokeStyle = '#0a0';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(rectX, rectY, rectW, rectH);
+
+  drones.forEach(d => {
+    const dx = player.x + d.offsetX;
+    const dy = player.y + d.offsetY;
+    ctx.fillStyle = '#0af';
+    ctx.fillRect(dx, dy, 14, 14);
+    if (ts - d.lastShot > 180) {
+      const waveDamage = Math.floor(damage * (1 + (wave - 1) * 0.08));
+      bullets.push({ x: dx + 4, y: dy, vy: -7, dmg: Math.floor(waveDamage * 0.6) });
+      d.lastShot = ts;
+    }
+  });
+
+  if (ts - lastShot > fireRate) {
+    const waveDamage = Math.floor(damage * (1 + (wave - 1) * 0.08));
+    for (let i = 0; i < multiShot; i++) {
+      const offset = (i - (multiShot-1)/2) * 12;
+      bullets.push({ x: player.x + 12 + offset, y: player.y, vy: -8, dmg: waveDamage });
+    }
+    lastShot = ts;
+  }
+
+  bullets = bullets.filter(b => {
+    b.y += b.vy;
+    ctx.fillStyle = '#0ff';
+    ctx.fillRect(b.x, b.y, 6, 12);
+    return b.y > 0;
+  });
+
+  // Enemy bullets
+  enemyBullets = enemyBullets.filter(b => {
+    b.x += b.vx;
+    b.y += b.vy;
+    ctx.fillStyle = b.type === 'tank' ? '#f40' : '#0ff';
+    ctx.fillRect(b.x - 3, b.y - 3, 6, 6);
+    // Hit player
+    if (b.x > player.x && b.x < player.x + player.w && b.y > player.y && b.y < player.y + player.h && invuln <= 0 && running) {
+      if (hasShield) {
+        hasShield = false;
+        shieldTimer = 0;
+        return false;
+      }
+      const dist = Math.sqrt(Math.pow(b.x - (player.x + player.w/2), 2) + Math.pow(b.y - (player.y + player.h/2), 2));
+      const falloff = Math.max(0.4, 1 - dist / 200);
+      player.hp -= Math.ceil(b.dmg * falloff);
+      invuln = 20;
+      energy = Math.max(0, energy - 1);
+      if (player.hp <= 0) {
+        player.hp = 0;
+        running = false;
+        alert('Run ended! HP depleted.');
+      }
+      updateUI();
+      return false;
+    }
+    return b.y > 0 && b.y < canvas.height && b.x > 0 && b.x < canvas.width;
+  });
+
+  // Health bubbles
+  healthBubbles = healthBubbles.filter(b => {
+    b.y += b.vy;
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(0,255,0,0.4)';
+    ctx.fill();
+    // Collect by shooting or touching
+    let collected = false;
+    bullets.forEach(bullet => {
+      if (bullet.x > b.x && bullet.x < b.x + b.w && bullet.y > b.y && bullet.y < b.y + b.h) {
+        collected = true;
+        bullet.y = -999;
+      }
+    });
+    const dx = (b.x + b.w/2) - (player.x + player.w/2);
+    const dy = (b.y + b.h/2) - (player.y + player.h/2);
+    if (Math.sqrt(dx*dx + dy*dy) < 40) collected = true;
+    if (collected) {
+      player.hp = Math.min(player.maxHp, player.hp + b.heal);
+      updateUI();
+      return false;
+    }
+    return b.y < canvas.height;
+  });
+
+  // Shield bubbles
+  shieldBubbles = shieldBubbles.filter(b => {
+    b.y += b.vy;
+    ctx.strokeStyle = '#0ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(0,255,255,0.3)';
+    ctx.fill();
+    // Pop with player bullets
+    bullets.forEach(bullet => {
+      if (bullet.x > b.x && bullet.x < b.x + b.w && bullet.y > b.y && bullet.y < b.y + b.h) {
+        b.hp -= bullet.dmg;
+        bullet.y = -999;
+        if (b.hp <= 0) {
+          hasShield = true;
+          shieldTimer = 300;
+          b.y = 9999;
+        }
+      }
+    });
+    return b.y < canvas.height && b.hp > 0;
+  });
+
+  // Shield timer
+  if (hasShield && shieldTimer > 0) {
+    shieldTimer--;
+    if (shieldTimer <= 0) hasShield = false;
+  }
+
+  enemies.forEach(e => {
+    // Varied movement patterns
+    if (!e.diving && e.y > 100) {
+      e.diving = true;
+      if (e.type === 'charger') {
+        e.vy = 2.4;
+        e.vx = (player.x - e.x) * 0.02;
+      } else if (e.type === 'shooter') {
+        e.vy = 0.8;
+        e.vx = Math.sin(Date.now() / 300 + e.x) * 1.0;
+      } else if (e.type === 'tank') {
+        e.vy = 0.6;
+        e.vx = (player.x - e.x) * 0.005;
+      } else {
+        // normal: slight weave or straight
+        e.vy = 1.2;
+        e.vx = Math.sin(Date.now() / 400 + e.y) * 0.5;
+      }
+    }
+    e.x += e.vx; e.y += e.vy;
+    // Shooting for shooters and tanks
+    if ((e.type === 'shooter' || e.type === 'tank') && Math.random() < (e.type === 'tank' ? 0.005 : 0.01) && e.y > 50 && e.y < 500) {
+      const dx = (player.x + player.w/2) - (e.x + e.w/2);
+      const dy = (player.y + player.h/2) - (e.y + e.h/2);
+      const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+      enemyBullets.push({
+        x: e.x + e.w/2,
+        y: e.y + e.h/2,
+        vx: (dx / dist) * (e.type === 'tank' ? 3 : 4),
+        vy: (dy / dist) * (e.type === 'tank' ? 3 : 4),
+        dmg: (e.type === 'tank' ? 8 + Math.floor(wave * 0.6) : 4 + Math.floor(wave * 0.4)) * enemyProjScale,
+        type: e.type
+      });
+    }
+    // Color by type
+    if (e.type === 'tank') ctx.fillStyle = '#a00';
+    else if (e.type === 'charger') ctx.fillStyle = '#f80';
+    else if (e.type === 'shooter') ctx.fillStyle = '#0af';
+    else ctx.fillStyle = e.diving ? '#f00' : '#ff0';
+    ctx.fillRect(e.x, e.y, e.w, e.h);
+    // Collision + coin drop
+    bullets.forEach(b => {
+      if (b.x > e.x && b.x < e.x+e.w && b.y > e.y && b.y < e.y+e.h) {
+        e.hp -= b.dmg;
+        b.y = -999;
+        if (e.hp <= 0) {
+          let drop = 1;
+          if (e.type === 'tank') drop = 5;
+          else if (e.type === 'charger') drop = 3;
+          else if (e.type === 'shooter') drop = 2;
+          coins += drop;
+          if (e.type === 'tank') energy = Math.min(20, energy + 1);
+          // Chance to drop health bubble — starts ~1% at wave 1, decreases slowly
+          let baseChance = Math.max(0.004, 0.012 - wave * 0.0008);
+          let chance = baseChance;
+          if (e.type === 'tank') chance = baseChance * 3;
+          else if (e.type === 'charger') chance = baseChance * 2;
+          else if (e.type === 'shooter') chance = baseChance * 1.5;
+          if (Math.random() < chance) {
+            healthBubbles.push({
+              x: e.x,
+              y: e.y,
+              w: 24, h: 24,
+              vy: 0.8,
+              heal: 15 + Math.floor(wave * 1.5)
+            });
+          }
+          updateUI();
+        }
+      }
+    });
+  });
+  enemies = enemies.filter(e => e.hp > 0 && e.y < canvas.height);
+
+  if (boss) {
+    ctx.fillStyle = '#666';
+    ctx.fillRect(boss.x, boss.y, boss.w, boss.h);
+    boss.turrets.forEach((t) => {
+      if (t.active) {
+        ctx.fillStyle = '#f80';
+        ctx.fillRect(boss.x + t.x, boss.y + t.y, 20, 20);
+      }
+    });
+    bullets.forEach(b => {
+      if (b.x > boss.x && b.x < boss.x+boss.w && b.y > boss.y && b.y < boss.y+boss.h) {
+        boss.hp -= b.dmg; b.y = -999;
+        boss.turrets.forEach(t => {
+          if (t.active && b.x > boss.x+t.x && b.x < boss.x+t.x+20) t.hp -= b.dmg;
+        });
+      }
+    });
+    boss.turrets.forEach(t => { if (t.hp <= 0) t.active = false; });
+    if (boss.hp <= 0) { coins += 50; energy = Math.min(20, energy + 2); boss = null; showPowerups(); }
+  }
+
+  if (enemies.length === 0 && !boss && running && !picking) {
+    // Only advance if this is not a boss wave that still needs a boss
+    if (wave % 5 === 0 && wave > 0) {
+      // Boss should be here — re-spawn if missing
+      if (!boss) spawnBoss();
+    } else {
+      showPowerups();
+    }
+  }
+
+  // Contact damage from close enemies
+  if (invuln > 0) invuln--;
+  enemies.forEach(e => {
+    const dx = (e.x + e.w/2) - (player.x + player.w/2);
+    const dy = (e.y + e.h/2) - (player.y + player.h/2);
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist < 40 && invuln <= 0 && running) {
+      if (hasShield) {
+        hasShield = false;
+        shieldTimer = 0;
+      } else {
+        let dmg = (3 + Math.floor(wave * 0.6)) * contactDmgScale;
+        if (e.type === 'tank') dmg = (8 + wave) * contactDmgScale;
+        else if (e.type === 'charger') dmg = (6 + Math.floor(wave * 0.7)) * contactDmgScale;
+        else if (e.type === 'shooter') dmg = (5 + Math.floor(wave * 0.5)) * contactDmgScale;
+        player.hp -= dmg;
+        invuln = 30;
+        energy = Math.max(0, energy - 1);
+        if (player.hp <= 0) {
+          player.hp = 0;
+          running = false;
+          alert('Run ended! HP depleted.');
+        }
+      }
+      updateUI();
+    }
+  });
+
+  drawHealthBar();
+
+  // Draw player + cross reticle (center is the movable dot)
+  ctx.fillStyle = hasShield ? '#0ff' : (invuln > 0 ? '#0a0' : '#0f0');
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 1;
+  const cx = player.x + player.w / 2;
+  const cy = player.y + player.h / 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 18, cy); ctx.lineTo(cx + 18, cy);
+  ctx.moveTo(cx, cy - 18); ctx.lineTo(cx, cy + 18);
+  ctx.stroke();
+  if (hasShield) {
+    ctx.strokeStyle = '#0ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+document.addEventListener('keydown', e => { keys[e.key] = true; });
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+function getCanvasTouch(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const t = e.touches ? e.touches[0] : e;
+  const clientX = t.clientX;
+  const clientY = t.clientY;
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY
+  };
+}
+
+// Better touch support for mobile (Pixel)
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (e.touches.length) {
+    const p = getCanvasTouch(e);
+    touchX = p.x; touchY = p.y;
+  }
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length) {
+    const p = getCanvasTouch(e);
+    touchX = p.x; touchY = p.y;
+  }
+}, { passive: false });
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (!e.touches.length) {
+    touchX = null; touchY = null;
+  }
+}, { passive: false });
+canvas.addEventListener('touchcancel', e => {
+  touchX = null; touchY = null;
+}, { passive: false });
+
+canvas.addEventListener('mousedown', e => {
+  const p = getCanvasTouch(e);
+  touchX = p.x; touchY = p.y;
+});
+canvas.addEventListener('mousemove', e => {
+  if (e.buttons) {
+    const p = getCanvasTouch(e);
+    touchX = p.x; touchY = p.y;
+  }
+});
+canvas.addEventListener('mouseup', () => { touchX = null; touchY = null; });
+
+updateUI();
+requestAnimationFrame(gameLoop);
+
+// Extra touch support for Start button on mobile
+document.getElementById('startBtn').addEventListener('touchend', function(e) {
+  e.preventDefault();
+  startRun();
+}, { passive: false });
 </script>
 </body>
 </html>
