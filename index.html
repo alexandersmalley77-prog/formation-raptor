@@ -26,6 +26,8 @@ button { margin:1px; padding:3px 5px; background:#003300; color:#0f0; border:1px
 </head>
 <body>
 <div id="ui">
+  <button onclick="toggleUI()">☰ Options</button>
+  <div id="uiPanel">
   Energy: <span id="energy">10</span> | Coins: <span id="coins">0</span> | Wave: <span id="wave">1</span>
   <br><button id="startBtn" onclick="startRun()">Start Run (1 Energy)</button>
   <button onclick="upgradeDamage()">Upgrade Damage (+10 coins)</button>
@@ -33,6 +35,7 @@ button { margin:1px; padding:3px 5px; background:#003300; color:#0f0; border:1px
   <button onclick="togglePause()">Pause</button>
   <button onclick="toggleUpgrades()">Upgrades</button>
   <button onclick="document.getElementById('controls').style.display=document.getElementById('controls').style.display==='block'?'none':'block'">Tune</button>
+  </div>
 </div>
 <div id="leaderboard">
   <div style="font-size:16px; margin-bottom:6px; border-bottom:1px solid #0f0;">Leaderboard</div>
@@ -124,6 +127,14 @@ const powerups = [
   { name: "Drone Boost", apply: () => { drones.push({ offsetX: 0, offsetY: -40, lastShot: 0 }); } },
   { name: "+Speed", apply: () => { player.speed += 1; } }
 ];
+
+function toggleUI() {
+  const panel = document.getElementById('uiPanel');
+  const lb = document.getElementById('leaderboard');
+  const open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  if (lb) lb.style.display = open ? 'none' : 'block';
+}
 
 function updateUI() {
   document.getElementById('energy').textContent = energy;
