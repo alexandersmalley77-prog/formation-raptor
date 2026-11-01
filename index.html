@@ -59,6 +59,7 @@ button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1p
   <button onclick="toggleUpgrades()">Upgrades</button>
   <button onclick="document.getElementById('controls').style.display=document.getElementById('controls').style.display==='block'?'none':'block'">Tune</button>
   <button onclick="toggleDrones()">Drones</button>
+  <button onclick="showScores()">Scores</button>
   </div>
 </div>
 <div id="leaderboard">
@@ -85,7 +86,7 @@ button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1p
   <button onclick="document.getElementById('controls').style.display='none'">Hide</button>
 </div>
 <div id="powerup">
-  <div style="font-size:20px; margin-bottom:10px;">Wave Clear! Pick a Power-Up</div>
+  <div id="powerupTitle" style="font-size:20px; margin-bottom:10px;">Wave Clear! Pick a Power-Up</div>
   <button id="p1" onclick="pickPower(0)"></button>
   <button id="p2" onclick="pickPower(1)"></button>
   <button id="p3" onclick="pickPower(2)"></button>
@@ -116,38 +117,82 @@ button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1p
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-let energy = 10, coins = 0, wave = 1, damage = 36, running = false;
-let player = { x: 240, y: 600, w: 30, h: 30, speed: 5, hp: 100, maxHp: 100 };
-let bullets = [], enemies = [], boss = null, keys = {};
-let enemyBullets = [];
+const W = canvas.width, H = canvas.height;
+
+// ===================== Persistent save (one object) =====================
+const SAVE_KEY = 'fr_save_v1';
+const MAX_ENERGY = 10;
+const ENERGY_REGEN_MS = 5 * 60 * 1000; // +1 energy every 5 minutes
+function loadSave() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) { s = null; }
+  if (!s || typeof s !== 'object') s = {};
+  const legacyDrone = parseInt(localStorage.getItem('fr_droneLevel') || '1') || 1; // migrate old key
+  return {
+    coins: Number.isFinite(s.coins) ? s.coins : 0,
+    upg: Object.assign({ dmg: 0, fr: 0, spd: 0, hp: 0 }, s.upg || {}),
+    droneLevel: s.droneLevel || legacyDrone,
+    energy: Number.isFinite(s.energy) ? s.energy : MAX_ENERGY,
+    energyTs: s.energyTs || Date.now()
+  };
+}
+let save = loadSave();
+let energy = save.energy, coins = save.coins, droneLevel = save.droneLevel;
+function persist() {
+  save.coins = coins; save.droneLevel = droneLevel; save.energy = energy;
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+}
+function tickEnergy() {
+  const now = Date.now();
+  if (energy >= MAX_ENERGY) { save.energyTs = now; return; }
+  const gained = Math.floor((now - save.energyTs) / ENERGY_REGEN_MS);
+  if (gained > 0) {
+    energy = Math.min(MAX_ENERGY, energy + gained);
+    save.energyTs = energy >= MAX_ENERGY ? now : save.energyTs + gained * ENERGY_REGEN_MS;
+    persist();
+  }
+  updateUI();
+}
+function energyEta() {
+  if (energy >= MAX_ENERGY) return '';
+  const s = Math.max(0, Math.ceil((ENERGY_REGEN_MS - (Date.now() - save.energyTs)) / 1000));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+// Permanent upgrades are applied at run start (never reset)
+function baseStats() {
+  const u = save.upg;
+  return { damage: 36 + u.dmg * 5, fireRate: Math.max(50, 110 - u.fr * 15), speed: 5 + u.spd, maxHp: 100 + u.hp * 20 };
+}
+
+// ===================== Run state =====================
+let state = 'idle'; // 'idle' | 'running' | 'gameover'
+let running = false;
+let wave = 1, damage = 36, fireRate = 110, multiShot = 1;
+let player = { x: 225, y: 560, w: 30, h: 30, speed: 5, hp: 100, maxHp: 100 };
+let bullets = [], enemies = [], enemyBullets = [], particles = [], boss = null, keys = {};
 let lastShot = 0;
-let touchX = null;
-let touchY = null;
-// Relative drag: finger start + ship start; ship moves by finger delta
-let drag = null; // { fx, fy, px, py }
+let touchX = null, touchY = null;
+let drag = null; // relative drag anchor { fx, fy, px, py }
 const DRAG_SENS = 1.2;
 let mode = 'multi';
 let drones = [];
-let fireRate = 100;
-let multiShot = 1;
-let picking = false;
-let paused = false;
+let picking = false, paused = false;
 let currentOptions = [];
 let invuln = 0;
-let shieldBubbles = [];
-let healthBubbles = [];
-let hasShield = false;
-let shieldTimer = 0;
-let enemyHPScale = 1;
-let contactDmgScale = 1;
-let enemyProjScale = 1;
-let dmgBuys = 0, frBuys = 0, spdBuys = 0, hpBuys = 0;
-let runScore = 0;
+let shieldBubbles = [], healthBubbles = [];
+let hasShield = false, shieldTimer = 0;
+let enemyHPScale = 1, contactDmgScale = 1, enemyProjScale = 1;
+let runScore = 0, runCoins = 0, runStart = 0;
+let lastSummary = null;
+let banner = null; // { text, t }
 let highScores = JSON.parse(localStorage.getItem('fr_scores') || '[]');
-let droneLevel = parseInt(localStorage.getItem('fr_droneLevel') || '1');
 const droneColors = ['#0af', '#0ff', '#ff0', '#f80', '#f0f', '#fff'];
 const droneNames = ['Basic', 'Enhanced', 'Advanced', 'Elite', 'Master', 'Legend'];
+const DRONE_SLOTS = [[-40, -20], [40, -20], [0, -45], [-70, 5], [70, 5], [-25, -60], [25, -60]];
+const PLAY = { x: 30, y: Math.round(H * 0.32), w: 420, h: 380 };
+const stars = Array.from({ length: 50 }, () => ({ x: Math.random() * W, y: Math.random() * H, s: 0.3 + Math.random() * 1.2 }));
 
+// Tune panel (dev sliders)
 function setDamage(v) { damage = parseInt(v); document.getElementById('dmgVal').textContent = v; }
 function setFireRate(v) { fireRate = parseInt(v); document.getElementById('frVal').textContent = v; }
 function setSpeed(v) { player.speed = parseInt(v); document.getElementById('spdVal').textContent = v; }
@@ -155,68 +200,60 @@ function setHP(v) { player.maxHp = parseInt(v); player.hp = Math.min(player.hp, 
 function setEnemyHP(v) { enemyHPScale = parseFloat(v); document.getElementById('ehpVal').textContent = v; }
 function setContactDmg(v) { contactDmgScale = parseFloat(v); document.getElementById('cdmgVal').textContent = v; }
 function setEnemyProj(v) { enemyProjScale = parseFloat(v); document.getElementById('epdmgVal').textContent = v; }
+function syncTune() {
+  [['dmg', damage], ['fr', fireRate], ['spd', player.speed], ['hp', player.maxHp]].forEach(([k, v]) => {
+    document.getElementById(k + 'Slider').value = v; document.getElementById(k + 'Val').textContent = v;
+  });
+}
 
+function addDrone() {
+  const slot = DRONE_SLOTS[drones.length % DRONE_SLOTS.length];
+  drones.push({ offsetX: slot[0], offsetY: slot[1], lastShot: 0 });
+}
 const powerups = [
   { name: "+Damage", apply: () => { damage += 15; } },
   { name: "+Fire Rate", apply: () => { fireRate = Math.max(50, fireRate - 20); } },
   { name: "Split Shot", apply: () => { multiShot = Math.max(multiShot, 2); } },
-  { name: "Dual Fire", apply: () => { multiShot += 1; } },
   { name: "+1 Projectile", apply: () => { multiShot++; } },
-  { name: "Drone Boost", apply: () => { drones.push({ offsetX: 0, offsetY: -40, lastShot: 0 }); } },
-  { name: "+Speed", apply: () => { player.speed += 1; } }
+  { name: "Drone Boost", apply: () => { addDrone(); } },
+  { name: "+Speed", apply: () => { player.speed += 1; } },
+  { name: "+30 Max HP & Heal", apply: () => { player.maxHp += 30; player.hp = player.maxHp; } }
 ];
 
+// ===================== Menus / UI =====================
 function toggleDrones() {
   const el = document.getElementById('drones');
   const open = el.style.display === 'block';
   el.style.display = open ? 'none' : 'block';
-  if (!open) {
-    updateDroneUI();
-    // Keep landing visible but raise modal above it
-  }
+  if (!open) updateDroneUI();
 }
-
+function droneCost() { return 100 + (droneLevel - 1) * 50; }
 function updateDroneUI() {
-  const color = droneColors[Math.min(droneLevel - 1, droneColors.length - 1)];
-  const name = droneNames[Math.min(droneLevel - 1, droneNames.length - 1)];
+  const i = Math.min(droneLevel - 1, droneColors.length - 1);
   document.getElementById('droneLevel').textContent = droneLevel;
-  document.getElementById('droneColorName').textContent = name;
-  document.getElementById('dronePreview').style.background = color;
-  const cost = 100 + (droneLevel - 1) * 50;
-  document.querySelector('#drones button').textContent = 'Upgrade Drone (' + cost + ' coins)';
+  document.getElementById('droneColorName').textContent = droneNames[i];
+  document.getElementById('dronePreview').style.background = droneColors[i];
+  document.querySelector('#drones button').textContent = droneLevel >= droneColors.length ? 'Drone MAXED' : 'Upgrade Drone (' + droneCost() + ' coins, have ' + coins + ')';
 }
-
 function upgradeDrone() {
-  const cost = 100 + (droneLevel - 1) * 50;
+  const cost = droneCost();
   if (coins >= cost && droneLevel < droneColors.length) {
-    coins -= cost;
-    droneLevel++;
-    localStorage.setItem('fr_droneLevel', droneLevel);
-    updateUI();
-    updateDroneUI();
+    coins -= cost; droneLevel++; persist(); updateUI(); updateDroneUI();
   }
 }
 
 function enterGame() {
   const landing = document.getElementById('landing');
-  if (landing) {
-    landing.style.display = 'none';
-    landing.style.visibility = 'hidden';
-  }
+  if (landing) { landing.style.display = 'none'; landing.style.visibility = 'hidden'; }
   const panel = document.getElementById('uiPanel');
   if (panel) panel.style.display = 'block';
   const lb = document.getElementById('leaderboard');
   if (lb) lb.style.display = 'block';
-  // Bring UI above canvas
   document.getElementById('ui').style.zIndex = '1000';
 }
-
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Enter' && document.getElementById('landing').style.display !== 'none') {
-    enterGame();
-  }
+  if (e.key === 'Enter' && document.getElementById('landing').style.display !== 'none') enterGame();
 });
-
 function toggleUI() {
   const panel = document.getElementById('uiPanel');
   const lb = document.getElementById('leaderboard');
@@ -224,147 +261,128 @@ function toggleUI() {
   panel.style.display = open ? 'none' : 'block';
   if (lb) lb.style.display = open ? 'none' : 'block';
 }
-
-function updateUI() {
-  document.getElementById('energy').textContent = energy;
-  document.getElementById('coins').textContent = coins;
-  document.getElementById('wave').textContent = wave;
-  document.getElementById('mode').textContent = mode === 'multi' ? 'Multi-Group' : 'Single Durable';
-}
-
-function drawHealthBar() {
-  const barW = 120, barH = 10;
-  const x = 10, y = canvas.height - 30;
-  ctx.fillStyle = '#300';
-  ctx.fillRect(x, y, barW, barH);
-  ctx.fillStyle = '#0f0';
-  ctx.fillRect(x, y, barW * (player.hp / player.maxHp), barH);
-  ctx.strokeStyle = '#0f0';
-  ctx.strokeRect(x, y, barW, barH);
-  ctx.fillStyle = '#0f0';
-  ctx.font = '12px monospace';
-  ctx.fillText('HP: ' + Math.ceil(player.hp), x, y - 4);
-}
-
-function toggleMode() {
-  mode = mode === 'multi' ? 'single' : 'multi';
-  updateUI();
-}
-
-function updateHomeScores() {
-  const el = document.getElementById('homeScores');
-  if (!el) return;
-  el.innerHTML = highScores.length ? highScores.map((s,i) => 
-    (i+1) + '. Wave ' + s.wave + ' — ' + s.score
-  ).join('<br>') : 'No scores yet';
-}
-
-function showScores() {
-  const el = document.getElementById('scores');
-  const list = document.getElementById('scoreList');
-  list.innerHTML = highScores.length ? highScores.map((s,i) => 
-    (i+1) + '. Wave ' + s.wave + ' — ' + s.score + ' pts'
-  ).join('<br>') : 'No scores yet';
-  el.style.display = 'block';
-}
-
-function saveScore() {
-  const entry = { wave: wave, score: runScore, date: new Date().toLocaleDateString() };
-  highScores.push(entry);
-  highScores.sort((a,b) => b.score - a.score);
-  highScores = highScores.slice(0, 10);
-  localStorage.setItem('fr_scores', JSON.stringify(highScores));
-  updateHomeScores();
-}
-
 function collapseOptions() {
   document.getElementById('uiPanel').style.display = 'none';
   const lb = document.getElementById('leaderboard'); if (lb) lb.style.display = 'none';
   document.getElementById('controls').style.display = 'none';
 }
-
-function startFromLanding() {
-  enterGame();
-  startRun();
+function updateUI() {
+  document.getElementById('energy').textContent = energy + '/' + MAX_ENERGY + (energy < MAX_ENERGY ? ' (+1 in ' + energyEta() + ')' : '');
+  document.getElementById('coins').textContent = coins;
+  document.getElementById('wave').textContent = wave;
+  document.getElementById('mode').textContent = mode === 'multi' ? 'Multi-Group' : 'Single Durable';
+  const sb = document.getElementById('startBtn');
+  if (sb) sb.textContent = running ? 'Run in progress' : (energy > 0 ? 'Start Run (1 Energy)' : 'Energy in ' + energyEta());
+}
+function toggleMode() { mode = mode === 'multi' ? 'single' : 'multi'; updateUI(); }
+function togglePause() {
+  if (state !== 'running' || picking) return;
+  paused = !paused;
+  if (paused) persist();
+}
+function updateHomeScores() {
+  const el = document.getElementById('homeScores');
+  if (!el) return;
+  el.innerHTML = highScores.length ? highScores.map((s, i) => (i + 1) + '. Wave ' + s.wave + ' — ' + s.score).join('<br>') : 'No scores yet';
+}
+function showScores() {
+  const list = document.getElementById('scoreList');
+  list.innerHTML = highScores.length ? highScores.map((s, i) => (i + 1) + '. Wave ' + s.wave + ' — ' + s.score + ' pts').join('<br>') : 'No scores yet';
+  document.getElementById('scores').style.display = 'block';
+}
+function saveScore() {
+  highScores.push({ wave: wave, score: runScore, date: new Date().toLocaleDateString() });
+  highScores.sort((a, b) => b.score - a.score);
+  highScores = highScores.slice(0, 10);
+  localStorage.setItem('fr_scores', JSON.stringify(highScores));
+  updateHomeScores();
 }
 
-function startRun() {
-  if (energy <= 0 || running) return;
-  collapseOptions();
-  energy--;
-  running = true;
-  picking = false;
-  paused = false;
-  enemies = [];
-  bullets = [];
-  enemyBullets = [];
-  shieldBubbles = [];
-  healthBubbles = [];
-  hasShield = false;
-  wave = 1;
-  runScore = 0;
-  damage = 36;
-  fireRate = 110;
-  multiShot = 1;
-  player.speed = 5;
-  player.hp = player.maxHp;
-  drones = [
-    { offsetX: -40, offsetY: -20, lastShot: 0 },
-    { offsetX: 40, offsetY: -20, lastShot: 0 }
-  ];
-  document.getElementById('powerup').style.display = 'none';
-  spawnWave();
-  updateUI();
+// Permanent upgrades (persisted in save.upg)
+const UPGRADES = {
+  dmg: { base: 100, step: 50, max: 20, label: n => '+5 Damage', apply: () => { damage += 5; } },
+  fr:  { base: 100, step: 60, max: 4,  label: n => '+Fire Rate', apply: () => { fireRate = Math.max(50, fireRate - 15); } },
+  spd: { base: 100, step: 50, max: 5,  label: n => '+1 Speed', apply: () => { player.speed += 1; } },
+  hp:  { base: 100, step: 70, max: 10, label: n => '+20 Max HP', apply: () => { player.maxHp += 20; player.hp += 20; } }
+};
+const UPG_BTN = { dmg: 'btnDmg', fr: 'btnFR', spd: 'btnSpd', hp: 'btnHP' };
+function upgCost(k) { return UPGRADES[k].base + save.upg[k] * UPGRADES[k].step; }
+function buyUpgrade(k) {
+  const u = UPGRADES[k], cost = upgCost(k);
+  if (save.upg[k] >= u.max || coins < cost) return;
+  coins -= cost; save.upg[k]++;
+  if (running) u.apply(); // also takes effect in the current run
+  persist(); updateUI(); updateUpgradeButtons();
 }
-
+function buyDamage() { buyUpgrade('dmg'); }
+function buyFireRate() { buyUpgrade('fr'); }
+function buySpeed() { buyUpgrade('spd'); }
+function buyMaxHP() { buyUpgrade('hp'); }
+function updateUpgradeButtons() {
+  document.getElementById('upgCoins').textContent = coins;
+  Object.keys(UPGRADES).forEach(k => {
+    const u = UPGRADES[k], n = save.upg[k];
+    document.getElementById(UPG_BTN[k]).textContent = u.label(n) + ' [' + n + '/' + u.max + '] ' + (n >= u.max ? 'MAX' : '(' + upgCost(k) + ' coins)');
+  });
+}
 function toggleUpgrades() {
   const el = document.getElementById('upgrades');
   const open = el.style.display === 'block';
   el.style.display = open ? 'none' : 'block';
-  document.getElementById('upgCoins').textContent = coins;
   updateUpgradeButtons();
   if (!open && running) paused = true;
   if (open) paused = false;
 }
 
-function updateUpgradeButtons() {
-  document.getElementById('btnDmg').textContent = '+5 Damage (' + (100 + dmgBuys * 50) + ' coins)';
-  document.getElementById('btnFR').textContent = '+Fire Rate (' + (100 + frBuys * 60) + ' coins)';
-  document.getElementById('btnSpd').textContent = '+1 Speed (' + (100 + spdBuys * 50) + ' coins)';
-  document.getElementById('btnHP').textContent = '+20 Max HP (' + (100 + hpBuys * 70) + ' coins)';
+// ===================== Run flow =====================
+function startFromLanding() { enterGame(); startRun(); }
+function startRun() {
+  if (running) return;
+  tickEnergy();
+  if (energy <= 0) { banner = { text: 'No energy — +1 in ' + energyEta(), t: 150 }; return; }
+  if (energy >= MAX_ENERGY) save.energyTs = Date.now();
+  energy--;
+  collapseOptions();
+  state = 'running'; running = true; picking = false; paused = false;
+  enemies = []; bullets = []; enemyBullets = []; particles = [];
+  shieldBubbles = []; healthBubbles = []; boss = null;
+  hasShield = false; invuln = 0;
+  wave = 1; runScore = 0; runCoins = 0; runStart = performance.now();
+  const st = baseStats();
+  damage = st.damage; fireRate = st.fireRate; player.speed = st.speed;
+  player.maxHp = st.maxHp; player.hp = st.maxHp; multiShot = 1;
+  player.x = W / 2 - player.w / 2; player.y = PLAY.y + PLAY.h - 60;
+  drones = []; addDrone(); addDrone();
+  document.getElementById('powerup').style.display = 'none';
+  syncTune();
+  spawnWave();
+  persist(); updateUI();
+}
+function endRun() {
+  player.hp = 0;
+  running = false; state = 'gameover'; paused = false; drag = null;
+  saveScore(); persist();
+  lastSummary = { score: runScore, wave: wave, coins: runCoins, best: highScores.length ? highScores[0].score : runScore,
+                  time: Math.round((performance.now() - runStart) / 1000) };
+  updateUI();
+}
+function backToMenu() {
+  state = 'idle'; running = false;
+  document.getElementById('uiPanel').style.display = 'block';
+  const lb = document.getElementById('leaderboard'); if (lb) lb.style.display = 'block';
+  updateUI();
 }
 
-function buyDamage() {
-  const cost = 100 + dmgBuys * 50;
-  if (coins >= cost) { coins -= cost; damage += 5; dmgBuys++; updateUI(); document.getElementById('upgCoins').textContent = coins; updateUpgradeButtons(); }
-}
-function buyFireRate() {
-  const cost = 100 + frBuys * 60;
-  if (coins >= cost) { coins -= cost; fireRate = Math.max(50, fireRate - 15); frBuys++; updateUI(); document.getElementById('upgCoins').textContent = coins; updateUpgradeButtons(); }
-}
-function buySpeed() {
-  const cost = 100 + spdBuys * 50;
-  if (coins >= cost) { coins -= cost; player.speed += 1; spdBuys++; updateUI(); document.getElementById('upgCoins').textContent = coins; updateUpgradeButtons(); }
-}
-function buyMaxHP() {
-  const cost = 100 + hpBuys * 70;
-  if (coins >= cost) { coins -= cost; player.maxHp += 20; player.hp += 20; hpBuys++; updateUI(); document.getElementById('upgCoins').textContent = coins; updateUpgradeButtons(); }
-}
-
-function showPowerups() {
+function showPowerups(title) {
   picking = true;
   currentOptions = [];
   const pool = [...powerups];
-  for (let i = 0; i < 3; i++) {
-    const idx = Math.floor(Math.random() * pool.length);
-    currentOptions.push(pool.splice(idx, 1)[0]);
-  }
-  document.getElementById('p1').textContent = currentOptions[0].name;
-  document.getElementById('p2').textContent = currentOptions[1].name;
-  document.getElementById('p3').textContent = currentOptions[2].name;
+  for (let i = 0; i < 3; i++) currentOptions.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  document.getElementById('powerupTitle').textContent = title || 'Wave Clear! Pick a Power-Up';
+  ['p1', 'p2', 'p3'].forEach((id, i) => document.getElementById(id).textContent = currentOptions[i].name);
   document.getElementById('powerup').style.display = 'block';
+  persist();
 }
-
 function pickPower(i) {
   if (!picking) return;
   currentOptions[i].apply();
@@ -375,458 +393,407 @@ function pickPower(i) {
   updateUI();
 }
 
+// ===================== Waves =====================
+function isMiniBossWave(w) { return w % 10 === 5; }
+function isBigBossWave(w) { return w % 10 === 0; }
+function waveEnemyCount(w) { return Math.min(60, Math.round(12 + (w - 1) * 2.6)); } // 12 at w1, ~35 at w10
+function pickType(w) {
+  const r = Math.random();
+  if (w >= 4 && r < 0.10) return 'tank';
+  if (w >= 2 && r < 0.28) return 'shooter';
+  if (r < 0.45) return 'charger';
+  return 'normal';
+}
+function makeEnemy(x, y, type, hpBase) {
+  const big = type === 'tank';
+  return { x, y, w: big ? 30 : 22, h: big ? 30 : 22, vx: 0, vy: 0.9, hp: big ? hpBase * 2.5 : hpBase, diving: false, type };
+}
+const PATTERNS = [
+  (n, y0, hp) => { const x = 120 + Math.random() * 220; for (let i = 0; i < n; i++) enemies.push(makeEnemy(x, y0 - i * 26, pickType(wave), hp)); },
+  (n, y0, hp) => { for (let i = 0; i < n; i++) enemies.push(makeEnemy(i % 2 ? 400 : 60, y0 - Math.floor(i / 2) * 26, pickType(wave), hp)); },
+  (n, y0, hp) => { for (let i = 0; i < n; i++) { const k = Math.ceil(i / 2), s = i % 2 ? 1 : -1; enemies.push(makeEnemy(229 + s * k * 30, y0 - k * 20, pickType(wave), hp)); } },
+  (n, y0, hp) => { const cols = Math.min(n, 6); for (let i = 0; i < n; i++) enemies.push(makeEnemy(80 + (i % cols) * 60, y0 - Math.floor(i / cols) * 34, pickType(wave), hp)); }
+];
 function spawnWave() {
-  enemies = [];
-  const countScale = 16 + Math.floor(wave * 4);
+  enemies = []; enemyBullets = [];
   const hpBase = (16 + wave * 5) * enemyHPScale;
-
-  if (mode === 'single') {
-    enemies.push({
-      x: 210, y: -120,
-      w: 90, h: 90,
-      vx: 0.15, vy: 0.4,
-      hp: 800 + wave * 150,
-      diving: false,
-      type: 'tank'
-    });
-    return;
-  }
-
-  const patterns = [
-    () => { // single column of normals
-      for (let i = 0; i < Math.floor(countScale * 1.0); i++) {
-        enemies.push({ x: 220, y: -50 - i * 22, w: 22, h: 22, vx: 0, vy: 0.7, hp: hpBase, diving: false, type: 'normal' });
-      }
-    },
-    () => { // sides with some chargers
-      for (let i = 0; i < Math.floor(countScale * 0.8); i++) {
-        const type = i % 4 === 0 ? 'charger' : 'normal';
-        enemies.push({ x: 60, y: -60 - i * 20, w: 22, h: 22, vx: 0, vy: 0.65, hp: hpBase, diving: false, type });
-        enemies.push({ x: 380, y: -60 - i * 20, w: 22, h: 22, vx: 0, vy: 0.65, hp: hpBase, diving: false, type });
-      }
-    },
-    () => { // V with shooters
-      for (let i = 0; i < Math.floor(countScale * 0.7); i++) {
-        const type = i % 3 === 0 ? 'shooter' : 'normal';
-        enemies.push({ x: 240 - i * 14, y: -50 - i * 18, w: 22, h: 22, vx: 0, vy: 0.7, hp: hpBase, diving: false, type });
-        enemies.push({ x: 240 + i * 14, y: -50 - i * 18, w: 22, h: 22, vx: 0, vy: 0.7, hp: hpBase, diving: false, type });
-      }
-    },
-    () => { // staggered tanks + normals
-      for (let g = 0; g < 4; g++) {
-        for (let i = 0; i < Math.ceil(countScale / 2.5); i++) {
-          const type = (g === 1 || g === 2) && i % 5 === 0 ? 'tank' : 'normal';
-          enemies.push({
-            x: 40 + g * 110,
-            y: -70 - i * 24 - g * 10,
-            w: type === 'tank' ? 32 : 22,
-            h: type === 'tank' ? 32 : 22,
-            vx: 0, vy: 0.6, hp: type === 'tank' ? hpBase * 2.5 : hpBase, diving: false, type
-          });
-        }
-      }
-    }
-  ];
-
-  const numPatterns = 3 + Math.floor(wave / 2);
-  for (let p = 0; p < numPatterns; p++) {
-    const fn = patterns[Math.floor(Math.random() * patterns.length)];
-    fn();
-  }
-
-  // Random mixed adds
-  const extras = 6 + Math.floor(wave * 2);
-  for (let i = 0; i < extras; i++) {
-    const types = ['normal', 'charger', 'shooter', 'tank'];
-    const type = types[Math.floor(Math.random() * types.length)];
-    enemies.push({
-      x: 30 + Math.random() * 420,
-      y: -100 - Math.random() * 300,
-      w: type === 'tank' ? 30 : 20,
-      h: type === 'tank' ? 30 : 20,
-      vx: (Math.random() - 0.5) * 0.4,
-      vy: 0.5 + Math.random() * 0.3,
-      hp: type === 'tank' ? hpBase * 2 : hpBase - 5,
-      diving: false,
-      type
-    });
-  }
-
-  // Boss waves: mini bosses on odd 10s (10, 30, 50...), big bosses on 20, 40, 60...
-  const isMiniBoss = wave % 20 === 10;
-  const isBigBoss = wave % 20 === 0 && wave > 0;
-  if (isMiniBoss || isBigBoss) {
-    // Clear center so the boss is visible
-    enemies = enemies.filter(e => Math.abs(e.x - 240) > 140 || e.y < -200);
-    spawnBoss(isBigBoss);
-  }
-
-  // Health bubble every 2 waves
-  if (wave % 2 === 0 && wave > 0) {
-    healthBubbles.push({
-      x: 100 + Math.random() * 280,
-      y: -50,
-      w: 28, h: 28,
-      vy: 1.4,
-      heal: 25 + wave * 2
-    });
-  }
-}
-
-function spawnBoss(isBig) {
-  if (isBig) {
-    // Big boss: waves 20, 40, 60...
-    boss = {
-      x: 80, y: 40,
-      w: 320, h: 160,
-      hp: 800 + wave * 40,
-      isBig: true,
-      turrets: [
-        { x: 20, y: 50, hp: 80, active: true },
-        { x: 280, y: 50, hp: 80, active: true },
-        { x: 150, y: 30, hp: 100, active: true }
-      ]
-    };
+  const bossWave = isMiniBossWave(wave) || isBigBossWave(wave);
+  if (bossWave) {
+    spawnBoss(isBigBossWave(wave));
+    // a few escorts on the flanks
+    const esc = 4 + Math.floor(wave / 10) * 2;
+    for (let i = 0; i < esc; i++) enemies.push(makeEnemy(i % 2 ? 420 : 40, -60 - Math.floor(i / 2) * 120, 'charger', hpBase));
+    shieldBubbles.push({ x: 60 + Math.random() * 340, y: -200, w: 30, h: 30, vy: 0.8, hp: 120 });
+    banner = { text: isBigBossWave(wave) ? 'WARNING: BOSS' : 'MINI BOSS', t: 120 };
+  } else if (mode === 'single') {
+    enemies.push({ x: 195, y: -120, w: 90, h: 90, vx: 0.15, vy: 0.4, hp: 800 + wave * 150, diving: false, type: 'tank' });
   } else {
-    // Mini boss: waves 10, 30, 50...
-    boss = {
-      x: 160, y: 70,
-      w: 160, h: 90,
-      hp: 280 + wave * 20,
-      isBig: false,
-      turrets: [
-        { x: 15, y: 30, hp: 40, active: true },
-        { x: 125, y: 30, hp: 40, active: true }
-      ]
-    };
+    let remaining = waveEnemyCount(wave), g = 0;
+    while (remaining > 0) {
+      const n = Math.min(remaining, 5 + Math.floor(Math.random() * 4));
+      PATTERNS[Math.floor(Math.random() * PATTERNS.length)](n, -40 - g * 170, hpBase);
+      remaining -= n; g++;
+    }
+    banner = { text: 'WAVE ' + wave, t: 70 };
   }
+  if (wave % 2 === 0) healthBubbles.push({ x: 100 + Math.random() * 280, y: -50, w: 28, h: 28, vy: 1.4, heal: 25 + wave * 2 });
 }
 
-function gameLoop(ts) {
-  if (!running || picking || paused) { requestAnimationFrame(gameLoop); return; }
-  ctx.fillStyle = '#001122';
-  ctx.fillRect(0,0,canvas.width,canvas.height);
+// ===================== Bosses =====================
+function spawnBoss(isBig) {
+  const tier = Math.floor((wave - 1) / 10);
+  const scale = (1 + (wave - 1) * 0.08) * (1 + tier * 0.6) * enemyHPScale;
+  if (isBig) {
+    boss = { isBig: true, w: 300, h: 120, targetY: 45, speed: 0.8, coreHp: 9000 * scale,
+      turrets: [ { rx: 14, size: 34, hp: 1650 * scale, kind: 'spread', cdBase: 110 },
+                 { rx: 133, size: 34, hp: 1900 * scale, kind: 'aimed', cdBase: 70 },
+                 { rx: 252, size: 34, hp: 1650 * scale, kind: 'spread', cdBase: 110 } ] };
+  } else {
+    boss = { isBig: false, w: 170, h: 80, targetY: 60, speed: 1.1, coreHp: 4000 * scale,
+      turrets: [ { rx: 12, size: 28, hp: 950 * scale, kind: 'aimed', cdBase: 80 },
+                 { rx: 130, size: 28, hp: 950 * scale, kind: 'spread', cdBase: 120 } ] };
+  }
+  boss.x = W / 2 - boss.w / 2; boss.y = -boss.h; boss.dir = 1; boss.phase = 1; boss.flash = 0; boss.t = 0; boss.coreCd = 90;
+  boss.hp = boss.maxHp = boss.coreHp;
+  boss.turrets.forEach((t, i) => { t.maxHp = t.hp; t.active = true; t.ry = boss.h - t.size - 2; t.cd = 60 + i * 25; });
+}
+function bossDmg() { return ((boss.isBig ? 9 : 6) + Math.floor(wave * 0.3)) * enemyProjScale; }
+function shoot(x, y, ang, speed, dmg, color) {
+  enemyBullets.push({ x, y, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, dmg, r: 4, color: color || '#f0f' });
+}
+function angleToPlayer(x, y) { return Math.atan2(player.y + player.h / 2 - y, player.x + player.w / 2 - x); }
+function updateBoss() {
+  const b = boss; b.t++;
+  if (b.flash > 0) b.flash--;
+  if (b.y < b.targetY) { b.y += 1.5; return; } // entering, not firing yet
+  b.x += b.speed * (b.phase === 2 ? 1.7 : 1) * b.dir;
+  if (b.x < 10) { b.x = 10; b.dir = 1; }
+  if (b.x + b.w > W - 10) { b.x = W - 10 - b.w; b.dir = -1; }
+  const p2 = b.phase === 2, dmg = bossDmg();
+  b.turrets.forEach(t => {
+    if (!t.active) return;
+    if (--t.cd > 0) return;
+    const cx = b.x + t.rx + t.size / 2, cy = b.y + t.ry + t.size;
+    if (t.kind === 'aimed') {
+      const a = angleToPlayer(cx, cy);
+      shoot(cx, cy, a, 3.6, dmg);
+      if (p2) { shoot(cx, cy, a - 0.18, 3.6, dmg); shoot(cx, cy, a + 0.18, 3.6, dmg); }
+    } else {
+      const n = p2 ? 7 : 5, arc = p2 ? 1.2 : 0.9, base = p2 ? angleToPlayer(cx, cy) : Math.PI / 2;
+      for (let i = 0; i < n; i++) shoot(cx, cy, base - arc / 2 + (arc * i) / (n - 1), 2.8, dmg, '#f80');
+    }
+    t.cd = Math.round(t.cdBase * (p2 ? 0.6 : 1));
+  });
+  // Core: aimed burst once turrets are gone; rotating ring in phase 2
+  if (--b.coreCd <= 0) {
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    const anyT = b.turrets.some(t => t.active);
+    if (p2) {
+      const n = b.isBig ? 14 : 10, off = b.t * 0.07;
+      for (let i = 0; i < n; i++) shoot(cx, cy, off + (Math.PI * 2 * i) / n, 2.4, dmg, '#ff4');
+      b.coreCd = b.isBig ? 90 : 110;
+    } else if (!anyT) {
+      const a = angleToPlayer(cx, cy);
+      [-0.15, 0, 0.15].forEach(d => shoot(cx, cy, a + d, 3.4, dmg, '#ff4'));
+      b.coreCd = 75;
+    } else b.coreCd = 30;
+  }
+  if (b.phase === 1 && b.hp <= b.maxHp / 2) {
+    b.phase = 2; b.flash = 40; b.coreCd = 30;
+    b.turrets.forEach(t => t.cd = Math.min(t.cd, 20));
+    banner = { text: 'PHASE 2', t: 80 };
+  }
+  // Contact damage
+  if (rectHit(player, b)) {
+    if (damagePlayer((b.isBig ? 20 : 12) * contactDmgScale, 45)) player.y = Math.min(PLAY.y + PLAY.h - player.h, player.y + 30);
+  }
+}
+function hitBoss(bl) {
+  const b = boss;
+  for (const t of b.turrets) {
+    if (t.active && bl.x + 3 > b.x + t.rx && bl.x + 3 < b.x + t.rx + t.size) {
+      t.hp -= bl.dmg;
+      if (t.hp <= 0) { t.active = false; burst(b.x + t.rx + t.size / 2, b.y + t.ry + t.size / 2, '#f80', 18); runScore += 150; }
+      return;
+    }
+  }
+  const armored = b.turrets.some(t => t.active);
+  b.hp -= bl.dmg * (armored ? 0.1 : 1); // core heavily armored until turrets are destroyed
+  if (b.hp <= 0) killBoss();
+}
+function killBoss() {
+  const b = boss;
+  burst(b.x + b.w / 2, b.y + b.h / 2, '#ff0', 60);
+  const c = b.isBig ? 100 : 40;
+  coins += c; runCoins += c; runScore += b.isBig ? 1000 : 400;
+  energy = Math.min(MAX_ENERGY, energy + 1);
+  boss = null;
+  enemies.forEach(e => burst(e.x + e.w / 2, e.y + e.h / 2, '#f00', 6));
+  enemies = []; enemyBullets = [];
+  updateUI();
+  showPowerups(b.isBig ? 'BOSS DOWN! Pick a Power-Up' : 'Mini Boss Down! Pick a Power-Up');
+}
 
-  // Prefer keyboard when keys are held; otherwise use mouse/touch drag
+// ===================== Helpers =====================
+function rectHit(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+function burst(x, y, color, n) {
+  for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, s = 1 + Math.random() * 3; particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 30 + Math.random() * 20, color }); }
+}
+// Returns true if damage was applied. Hits never cost energy.
+function damagePlayer(dmg, iframes) {
+  if (invuln > 0 || state !== 'running') return false;
+  if (hasShield) { hasShield = false; shieldTimer = 0; invuln = 20; return false; }
+  player.hp -= dmg; invuln = iframes || 20;
+  burst(player.x + player.w / 2, player.y + player.h / 2, '#0f0', 8);
+  if (player.hp <= 0) endRun();
+  return true;
+}
+
+// ===================== Update =====================
+function update(ts) {
+  // Movement: keyboard, else relative touch/mouse drag
   const usingKeys = keys['ArrowLeft'] || keys['a'] || keys['ArrowRight'] || keys['d'] || keys['ArrowUp'] || keys['w'] || keys['ArrowDown'] || keys['s'];
   if (usingKeys) {
     if (keys['ArrowLeft'] || keys['a']) player.x -= player.speed;
     if (keys['ArrowRight'] || keys['d']) player.x += player.speed;
     if (keys['ArrowUp'] || keys['w']) player.y -= player.speed;
     if (keys['ArrowDown'] || keys['s']) player.y += player.speed;
-    touchX = null; touchY = null;
-    drag = null;
-  } else if (drag && touchX !== null && touchY !== null) {
+  } else if (drag && touchX !== null) {
     player.x = drag.px + (touchX - drag.fx) * DRAG_SENS;
     player.y = drag.py + (touchY - drag.fy) * DRAG_SENS;
   }
-  // Rectangle perimeter the player cannot move past (larger for phone)
-  const rectX = 30, rectY = canvas.height * 0.32, rectW = 420, rectH = 380;
-  player.x = Math.max(rectX, Math.min(rectX + rectW - player.w, player.x));
-  player.y = Math.max(rectY, Math.min(rectY + rectH - player.h, player.y));
-  // Re-anchor drag when clamped so reversing direction responds immediately
-  if (drag && touchX !== null) {
-    drag.px = player.x; drag.py = player.y; drag.fx = touchX; drag.fy = touchY;
-  }
+  player.x = Math.max(PLAY.x, Math.min(PLAY.x + PLAY.w - player.w, player.x));
+  player.y = Math.max(PLAY.y, Math.min(PLAY.y + PLAY.h - player.h, player.y));
+  if (drag && touchX !== null) { drag.px = player.x; drag.py = player.y; drag.fx = touchX; drag.fy = touchY; }
+  if (invuln > 0) invuln--;
+  if (hasShield && --shieldTimer <= 0) hasShield = false;
 
-  // Draw the movement rectangle perimeter
-  ctx.strokeStyle = '#0a0';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(rectX, rectY, rectW, rectH);
-
+  // Player + drone fire
+  const waveMul = 1 + (wave - 1) * 0.08;
   drones.forEach(d => {
-    const dx = player.x + d.offsetX;
-    const dy = player.y + d.offsetY;
-    ctx.fillStyle = droneColors[Math.min(droneLevel - 1, droneColors.length - 1)];
-    ctx.fillRect(dx, dy, 14, 14);
     if (ts - d.lastShot > 180) {
-      const waveDamage = Math.floor(damage * (1 + (wave - 1) * 0.08) * (1 + (droneLevel - 1) * 0.15));
-      bullets.push({ x: dx + 4, y: dy, vy: -7, dmg: Math.floor(waveDamage * 0.6) });
+      const dmg = Math.floor(damage * waveMul * (1 + (droneLevel - 1) * 0.15) * 0.6);
+      bullets.push({ x: player.x + d.offsetX + 4, y: player.y + d.offsetY, vy: -7, dmg });
       d.lastShot = ts;
     }
   });
-
   if (ts - lastShot > fireRate) {
-    const waveDamage = Math.floor(damage * (1 + (wave - 1) * 0.08));
     for (let i = 0; i < multiShot; i++) {
-      const offset = (i - (multiShot-1)/2) * 12;
-      bullets.push({ x: player.x + 12 + offset, y: player.y, vy: -8, dmg: waveDamage });
+      bullets.push({ x: player.x + 12 + (i - (multiShot - 1) / 2) * 12, y: player.y, vy: -8, dmg: Math.floor(damage * waveMul) });
     }
     lastShot = ts;
   }
+  bullets.forEach(b => b.y += b.vy);
 
-  bullets = bullets.filter(b => {
-    b.y += b.vy;
-    ctx.fillStyle = '#0ff';
-    ctx.fillRect(b.x, b.y, 6, 12);
-    return b.y > 0;
+  // Enemies
+  enemies.forEach(e => {
+    if (!e.diving && e.y > 100) {
+      e.diving = true;
+      if (e.type === 'charger') { e.vy = 2.2; e.vx = (player.x - e.x) * 0.012; }
+      else if (e.type === 'shooter') { e.vy = 0.8; e.wob = Math.random() * 6; }
+      else if (e.type === 'tank') { e.vy = 0.6; e.vx = (player.x - e.x) * 0.004; }
+      else { e.vy = 1.2; e.wob = Math.random() * 6; }
+    }
+    if (e.wob !== undefined) e.vx = Math.sin(ts / 400 + e.wob) * (e.type === 'shooter' ? 1.0 : 0.5);
+    e.x += e.vx; e.y += e.vy;
+    if ((e.type === 'shooter' || e.type === 'tank') && e.y > 50 && e.y < 500 && Math.random() < (e.type === 'tank' ? 0.005 : 0.008)) {
+      const cx = e.x + e.w / 2, cy = e.y + e.h / 2;
+      const dmg = (e.type === 'tank' ? 8 + Math.floor(wave * 0.6) : 4 + Math.floor(wave * 0.4)) * enemyProjScale;
+      shoot(cx, cy, angleToPlayer(cx, cy), e.type === 'tank' ? 3 : 4, dmg, e.type === 'tank' ? '#f40' : '#0ff');
+    }
+    for (const b of bullets) {
+      if (b.y > -50 && b.x + 3 > e.x && b.x + 3 < e.x + e.w && b.y > e.y && b.y < e.y + e.h) {
+        e.hp -= b.dmg; b.y = -999;
+        if (e.hp <= 0) {
+          const drop = e.type === 'tank' ? 5 : e.type === 'charger' ? 3 : e.type === 'shooter' ? 2 : 1;
+          coins += drop; runCoins += drop; runScore += drop * 10;
+          burst(e.x + e.w / 2, e.y + e.h / 2, '#f80', 8);
+          const base = Math.max(0.004, 0.012 - wave * 0.0008);
+          const chance = base * (e.type === 'tank' ? 3 : e.type === 'charger' ? 2 : e.type === 'shooter' ? 1.5 : 1);
+          if (Math.random() < chance) healthBubbles.push({ x: e.x, y: e.y, w: 24, h: 24, vy: 0.8, heal: 15 + Math.floor(wave * 1.5) });
+          break;
+        }
+      }
+    }
+    // Contact damage (never costs energy)
+    const dx = (e.x + e.w / 2) - (player.x + player.w / 2), dy = (e.y + e.h / 2) - (player.y + player.h / 2);
+    if (e.hp > 0 && Math.sqrt(dx * dx + dy * dy) < 30) {
+      const base = e.type === 'tank' ? 8 + wave : e.type === 'charger' ? 6 + Math.floor(wave * 0.7) : e.type === 'shooter' ? 5 + Math.floor(wave * 0.5) : 3 + Math.floor(wave * 0.6);
+      if (damagePlayer(base * contactDmgScale, 30)) { e.hp = 0; burst(e.x, e.y, '#f00', 6); } // rammed enemy dies
+    }
   });
+  enemies = enemies.filter(e => e.hp > 0 && e.y < H);
+
+  if (boss && state === 'running') {
+    updateBoss();
+    if (boss) for (const b of bullets) {
+      if (b.y > -50 && boss && b.x + 3 > boss.x && b.x + 3 < boss.x + boss.w && b.y > boss.y && b.y < boss.y + boss.h) { hitBoss(b); b.y = -999; }
+    }
+  }
+  bullets = bullets.filter(b => b.y > -20);
 
   // Enemy bullets
   enemyBullets = enemyBullets.filter(b => {
-    b.x += b.vx;
-    b.y += b.vy;
-    ctx.fillStyle = b.type === 'tank' ? '#f40' : '#0ff';
-    ctx.fillRect(b.x - 3, b.y - 3, 6, 6);
-    // Hit player
-    if (b.x > player.x && b.x < player.x + player.w && b.y > player.y && b.y < player.y + player.h && invuln <= 0 && running) {
-      if (hasShield) {
-        hasShield = false;
-        shieldTimer = 0;
-        return false;
-      }
-      const dist = Math.sqrt(Math.pow(b.x - (player.x + player.w/2), 2) + Math.pow(b.y - (player.y + player.h/2), 2));
-      const falloff = Math.max(0.4, 1 - dist / 200);
-      player.hp -= Math.ceil(b.dmg * falloff);
-      invuln = 20;
-      energy = Math.max(0, energy - 1);
-      if (player.hp <= 0) {
-        player.hp = 0;
-        running = false;
-        alert('Run ended! Wave ' + wave + ' — Score: ' + runScore);
-        saveScore();
-      }
-      updateUI();
-      return false;
+    b.x += b.vx; b.y += b.vy;
+    if (b.x > player.x - 2 && b.x < player.x + player.w + 2 && b.y > player.y - 2 && b.y < player.y + player.h + 2) {
+      if (invuln <= 0) { damagePlayer(b.dmg, 20); return false; }
     }
-    return b.y > 0 && b.y < canvas.height && b.x > 0 && b.x < canvas.width;
+    return b.y > -10 && b.y < H + 10 && b.x > -10 && b.x < W + 10;
   });
 
-  // Health bubbles
-  healthBubbles = healthBubbles.filter(b => {
-    b.y += b.vy;
-    ctx.strokeStyle = '#0f0';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(0,255,0,0.4)';
-    ctx.fill();
-    // Collect by shooting or touching
-    let collected = false;
-    bullets.forEach(bullet => {
-      if (bullet.x > b.x && bullet.x < b.x + b.w && bullet.y > b.y && bullet.y < b.y + b.h) {
-        collected = true;
-        bullet.y = -999;
-      }
-    });
-    const dx = (b.x + b.w/2) - (player.x + player.w/2);
-    const dy = (b.y + b.h/2) - (player.y + player.h/2);
-    if (Math.sqrt(dx*dx + dy*dy) < 40) collected = true;
-    if (collected) {
-      player.hp = Math.min(player.maxHp, player.hp + b.heal);
-      updateUI();
-      return false;
-    }
-    return b.y < canvas.height;
+  // Health bubbles: collect by shooting or touching
+  healthBubbles = healthBubbles.filter(hb => {
+    hb.y += hb.vy;
+    let got = false;
+    bullets.forEach(b => { if (b.x > hb.x && b.x < hb.x + hb.w && b.y > hb.y && b.y < hb.y + hb.h) { got = true; b.y = -999; } });
+    const dx = (hb.x + hb.w / 2) - (player.x + player.w / 2), dy = (hb.y + hb.h / 2) - (player.y + player.h / 2);
+    if (Math.sqrt(dx * dx + dy * dy) < 40) got = true;
+    if (got) { player.hp = Math.min(player.maxHp, player.hp + hb.heal); return false; }
+    return hb.y < H;
   });
-
-  // Shield bubbles
-  shieldBubbles = shieldBubbles.filter(b => {
-    b.y += b.vy;
-    ctx.strokeStyle = '#0ff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(0,255,255,0.3)';
-    ctx.fill();
-    // Pop with player bullets
-    bullets.forEach(bullet => {
-      if (bullet.x > b.x && bullet.x < b.x + b.w && bullet.y > b.y && bullet.y < b.y + b.h) {
-        b.hp -= bullet.dmg;
-        bullet.y = -999;
-        if (b.hp <= 0) {
-          hasShield = true;
-          shieldTimer = 300;
-          b.y = 9999;
-        }
-      }
-    });
-    return b.y < canvas.height && b.hp > 0;
-  });
-
-  // Shield timer
-  if (hasShield && shieldTimer > 0) {
-    shieldTimer--;
-    if (shieldTimer <= 0) hasShield = false;
-  }
-
-  enemies.forEach(e => {
-    // Varied movement patterns
-    if (!e.diving && e.y > 100) {
-      e.diving = true;
-      if (e.type === 'charger') {
-        e.vy = 2.4;
-        e.vx = (player.x - e.x) * 0.02;
-      } else if (e.type === 'shooter') {
-        e.vy = 0.8;
-        e.vx = Math.sin(Date.now() / 300 + e.x) * 1.0;
-      } else if (e.type === 'tank') {
-        e.vy = 0.6;
-        e.vx = (player.x - e.x) * 0.005;
-      } else {
-        // normal: slight weave or straight
-        e.vy = 1.2;
-        e.vx = Math.sin(Date.now() / 400 + e.y) * 0.5;
-      }
-    }
-    e.x += e.vx; e.y += e.vy;
-    // Shooting for shooters and tanks
-    if ((e.type === 'shooter' || e.type === 'tank') && Math.random() < (e.type === 'tank' ? 0.005 : 0.01) && e.y > 50 && e.y < 500) {
-      const dx = (player.x + player.w/2) - (e.x + e.w/2);
-      const dy = (player.y + player.h/2) - (e.y + e.h/2);
-      const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-      enemyBullets.push({
-        x: e.x + e.w/2,
-        y: e.y + e.h/2,
-        vx: (dx / dist) * (e.type === 'tank' ? 3 : 4),
-        vy: (dy / dist) * (e.type === 'tank' ? 3 : 4),
-        dmg: (e.type === 'tank' ? 8 + Math.floor(wave * 0.6) : 4 + Math.floor(wave * 0.4)) * enemyProjScale,
-        type: e.type
-      });
-    }
-    // Color by type
-    if (e.type === 'tank') ctx.fillStyle = '#a00';
-    else if (e.type === 'charger') ctx.fillStyle = '#f80';
-    else if (e.type === 'shooter') ctx.fillStyle = '#0af';
-    else ctx.fillStyle = e.diving ? '#f00' : '#ff0';
-    ctx.fillRect(e.x, e.y, e.w, e.h);
-    // Collision + coin drop
+  // Shield bubbles: pop with bullets
+  shieldBubbles = shieldBubbles.filter(sb => {
+    sb.y += sb.vy;
     bullets.forEach(b => {
-      if (b.x > e.x && b.x < e.x+e.w && b.y > e.y && b.y < e.y+e.h) {
-        e.hp -= b.dmg;
-        b.y = -999;
-        if (e.hp <= 0) {
-          let drop = 1;
-          if (e.type === 'tank') drop = 5;
-          else if (e.type === 'charger') drop = 3;
-          else if (e.type === 'shooter') drop = 2;
-          coins += drop;
-          runScore += drop * 10;
-          if (e.type === 'tank') energy = Math.min(20, energy + 1);
-          // Chance to drop health bubble — starts ~1% at wave 1, decreases slowly
-          let baseChance = Math.max(0.004, 0.012 - wave * 0.0008);
-          let chance = baseChance;
-          if (e.type === 'tank') chance = baseChance * 3;
-          else if (e.type === 'charger') chance = baseChance * 2;
-          else if (e.type === 'shooter') chance = baseChance * 1.5;
-          if (Math.random() < chance) {
-            healthBubbles.push({
-              x: e.x,
-              y: e.y,
-              w: 24, h: 24,
-              vy: 0.8,
-              heal: 15 + Math.floor(wave * 1.5)
-            });
-          }
-          updateUI();
-        }
+      if (sb.hp > 0 && b.x > sb.x && b.x < sb.x + sb.w && b.y > sb.y && b.y < sb.y + sb.h) {
+        sb.hp -= b.dmg; b.y = -999;
+        if (sb.hp <= 0) { hasShield = true; shieldTimer = 600; }
       }
     });
-  });
-  enemies = enemies.filter(e => e.hp > 0 && e.y < canvas.height);
-
-  if (boss) {
-    ctx.fillStyle = boss.isBig ? '#844' : '#666';
-    ctx.fillRect(boss.x, boss.y, boss.w, boss.h);
-    // Boss HP bar pinned to the top of the canvas (right of the Options button)
-    const maxHp = boss.isBig ? (800 + wave * 40) : (280 + wave * 20);
-    ctx.fillStyle = '#300';
-    ctx.fillRect(110, 12, 350, 10);
-    ctx.fillStyle = boss.isBig ? '#f40' : '#0f0';
-    ctx.fillRect(110, 12, 350 * Math.max(0, boss.hp / maxHp), 10);
-    ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.strokeRect(110, 12, 350, 10);
-    ctx.fillStyle = '#0f0'; ctx.font = '10px monospace';
-    ctx.fillText(boss.isBig ? 'BOSS' : 'MINI BOSS', 110, 34);
-    boss.turrets.forEach((t) => {
-      if (t.active) {
-        ctx.fillStyle = '#f80';
-        ctx.fillRect(boss.x + t.x, boss.y + t.y, boss.isBig ? 28 : 20, boss.isBig ? 28 : 20);
-      }
-    });
-    bullets.forEach(b => {
-      if (b.x > boss.x && b.x < boss.x+boss.w && b.y > boss.y && b.y < boss.y+boss.h) {
-        boss.hp -= b.dmg; b.y = -999;
-        boss.turrets.forEach(t => {
-          const tw = boss.isBig ? 28 : 20;
-          if (t.active && b.x > boss.x+t.x && b.x < boss.x+t.x+tw) t.hp -= b.dmg;
-        });
-      }
-    });
-    boss.turrets.forEach(t => { if (t.hp <= 0) t.active = false; });
-    if (boss.hp <= 0) { 
-      coins += boss.isBig ? 100 : 40; 
-      runScore += boss.isBig ? 1000 : 400; 
-      energy = Math.min(20, energy + (boss.isBig ? 3 : 1)); 
-      boss = null; 
-      showPowerups(); 
-    }
-  }
-
-  if (enemies.length === 0 && !boss && running && !picking) {
-    const isBossWave = (wave % 20 === 0 && wave > 0) || wave % 20 === 10;
-    if (isBossWave && !boss) {
-      // Boss wave but boss missing — spawn it
-      spawnBoss(wave % 20 === 0);
-    } else if (!isBossWave) {
-      showPowerups();
-    }
-  }
-
-  // Contact damage from close enemies
-  if (invuln > 0) invuln--;
-  enemies.forEach(e => {
-    const dx = (e.x + e.w/2) - (player.x + player.w/2);
-    const dy = (e.y + e.h/2) - (player.y + player.h/2);
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist < 40 && invuln <= 0 && running) {
-      if (hasShield) {
-        hasShield = false;
-        shieldTimer = 0;
-      } else {
-        let dmg = (3 + Math.floor(wave * 0.6)) * contactDmgScale;
-        if (e.type === 'tank') dmg = (8 + wave) * contactDmgScale;
-        else if (e.type === 'charger') dmg = (6 + Math.floor(wave * 0.7)) * contactDmgScale;
-        else if (e.type === 'shooter') dmg = (5 + Math.floor(wave * 0.5)) * contactDmgScale;
-        player.hp -= dmg;
-        invuln = 30;
-        energy = Math.max(0, energy - 1);
-        if (player.hp <= 0) {
-          player.hp = 0;
-          running = false;
-          saveScore();
-          alert('Run ended! Wave ' + wave + ' — Score: ' + runScore);
-        }
-      }
-      updateUI();
-    }
+    return sb.y < H && sb.hp > 0;
   });
 
-  drawHealthBar();
-
-  // Draw player + cross reticle (center is the movable dot)
-  ctx.fillStyle = hasShield ? '#0ff' : (invuln > 0 ? '#0a0' : '#0f0');
-  ctx.fillRect(player.x, player.y, player.w, player.h);
-  ctx.strokeStyle = '#0f0';
-  ctx.lineWidth = 1;
-  const cx = player.x + player.w / 2;
-  const cy = player.y + player.h / 2;
-  ctx.beginPath();
-  ctx.moveTo(cx - 18, cy); ctx.lineTo(cx + 18, cy);
-  ctx.moveTo(cx, cy - 18); ctx.lineTo(cx, cy + 18);
-  ctx.stroke();
-  if (hasShield) {
-    ctx.strokeStyle = '#0ff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
-    ctx.stroke();
+  if (state === 'running' && enemies.length === 0 && !boss && !picking) {
+    showPowerups();
   }
-
-  requestAnimationFrame(gameLoop);
 }
-document.addEventListener('keydown', e => { keys[e.key] = true; });
+
+// ===================== Render =====================
+function render() {
+  ctx.fillStyle = '#001122';
+  ctx.fillRect(0, 0, W, H);
+  stars.forEach(s => { if (!paused && !picking) { s.y += s.s; if (s.y > H) { s.y = 0; s.x = Math.random() * W; } } ctx.fillStyle = s.s > 1 ? '#8af' : '#246'; ctx.fillRect(s.x, s.y, 2, 2); });
+  if (state === 'idle') return renderIdle();
+
+  ctx.strokeStyle = '#0a0'; ctx.lineWidth = 2;
+  ctx.strokeRect(PLAY.x, PLAY.y, PLAY.w, PLAY.h);
+
+  healthBubbles.forEach(b => { ctx.strokeStyle = '#0f0'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, 0, Math.PI * 2); ctx.stroke(); ctx.fillStyle = 'rgba(0,255,0,0.4)'; ctx.fill(); });
+  shieldBubbles.forEach(b => { ctx.strokeStyle = '#0ff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, 0, Math.PI * 2); ctx.stroke(); ctx.fillStyle = 'rgba(0,255,255,0.3)'; ctx.fill(); });
+
+  enemies.forEach(e => {
+    ctx.fillStyle = e.type === 'tank' ? '#a00' : e.type === 'charger' ? '#f80' : e.type === 'shooter' ? '#0af' : (e.diving ? '#f00' : '#ff0');
+    ctx.fillRect(e.x, e.y, e.w, e.h);
+  });
+
+  if (boss) renderBoss();
+
+  ctx.fillStyle = '#0ff';
+  bullets.forEach(b => ctx.fillRect(b.x, b.y, 6, 12));
+  enemyBullets.forEach(b => { ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); });
+
+  // Drones + player
+  ctx.fillStyle = droneColors[Math.min(droneLevel - 1, droneColors.length - 1)];
+  drones.forEach(d => ctx.fillRect(player.x + d.offsetX, player.y + d.offsetY, 14, 14));
+  if (!(invuln > 0 && Math.floor(invuln / 4) % 2)) {
+    ctx.fillStyle = hasShield ? '#0ff' : '#0f0';
+    ctx.fillRect(player.x, player.y, player.w, player.h);
+  }
+  const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+  ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.beginPath();
+  ctx.moveTo(cx - 18, cy); ctx.lineTo(cx + 18, cy); ctx.moveTo(cx, cy - 18); ctx.lineTo(cx, cy + 18); ctx.stroke();
+  if (hasShield) { ctx.strokeStyle = '#0ff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 22, 0, Math.PI * 2); ctx.stroke(); }
+
+  particles = particles.filter(p => { if (!paused && !picking) { p.x += p.vx; p.y += p.vy; p.life--; } ctx.globalAlpha = Math.max(0, p.life / 50); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 3, 3); return p.life > 0; });
+  ctx.globalAlpha = 1;
+
+  renderHud();
+  if (banner && banner.t > 0) {
+    ctx.globalAlpha = Math.min(1, banner.t / 30); ctx.fillStyle = '#ff0'; ctx.font = 'bold 26px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(banner.text, W / 2, 200); ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+    if (!paused && !picking) banner.t--;
+  }
+  if (paused && state === 'running') overlayText('PAUSED', 'Tap to resume');
+  if (state === 'gameover') renderGameOver();
+}
+function renderBoss() {
+  const b = boss;
+  ctx.fillStyle = b.flash > 0 && b.flash % 6 < 3 ? '#fff' : (b.phase === 2 ? (b.isBig ? '#a33' : '#866') : (b.isBig ? '#844' : '#666'));
+  ctx.fillRect(b.x, b.y, b.w, b.h);
+  ctx.strokeStyle = b.phase === 2 ? '#f44' : '#aaa'; ctx.lineWidth = 2; ctx.strokeRect(b.x, b.y, b.w, b.h);
+  // core
+  const armored = b.turrets.some(t => t.active);
+  ctx.fillStyle = armored ? '#335' : (b.phase === 2 ? '#ff4' : '#fa0');
+  ctx.beginPath(); ctx.arc(b.x + b.w / 2, b.y + b.h / 2 - 8, b.isBig ? 18 : 13, 0, Math.PI * 2); ctx.fill();
+  b.turrets.forEach(t => {
+    if (!t.active) { ctx.fillStyle = '#222'; ctx.fillRect(b.x + t.rx, b.y + t.ry, t.size, t.size); return; }
+    ctx.fillStyle = t.kind === 'aimed' ? '#f0f' : '#f80';
+    ctx.fillRect(b.x + t.rx, b.y + t.ry, t.size, t.size);
+    ctx.fillStyle = '#300'; ctx.fillRect(b.x + t.rx, b.y + t.ry - 5, t.size, 3);
+    ctx.fillStyle = '#0f0'; ctx.fillRect(b.x + t.rx, b.y + t.ry - 5, t.size * Math.max(0, t.hp / t.maxHp), 3);
+  });
+  // Boss HP bar pinned to the top of the canvas (right of the Options button)
+  ctx.fillStyle = '#300'; ctx.fillRect(110, 12, 350, 10);
+  ctx.fillStyle = b.isBig ? '#f40' : '#0f0'; ctx.fillRect(110, 12, 350 * Math.max(0, b.hp / b.maxHp), 10);
+  ctx.strokeStyle = '#0f0'; ctx.lineWidth = 1; ctx.strokeRect(110, 12, 350, 10);
+  ctx.strokeStyle = '#ff0'; ctx.beginPath(); ctx.moveTo(285, 10); ctx.lineTo(285, 24); ctx.stroke(); // 50% phase mark
+  ctx.fillStyle = '#0f0'; ctx.font = '10px monospace';
+  ctx.fillText((b.isBig ? 'BOSS' : 'MINI BOSS') + (b.phase === 2 ? ' - PHASE 2' : '') + (armored ? ' - destroy turrets!' : ''), 110, 34);
+}
+function renderHud() {
+  const x = 10, y = H - 30;
+  ctx.fillStyle = '#300'; ctx.fillRect(x, y, 120, 10);
+  ctx.fillStyle = '#0f0'; ctx.fillRect(x, y, 120 * Math.max(0, player.hp / player.maxHp), 10);
+  ctx.strokeStyle = '#0f0'; ctx.strokeRect(x, y, 120, 10);
+  ctx.font = '12px monospace'; ctx.fillStyle = '#0f0';
+  ctx.fillText('HP: ' + Math.ceil(Math.max(0, player.hp)) + '/' + player.maxHp, x, y - 4);
+  ctx.fillText('Wave ' + wave + '  Score ' + runScore + '  Coins ' + coins, 145, y + 9);
+}
+function overlayText(t1, t2) {
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#0f0'; ctx.font = 'bold 30px monospace'; ctx.fillText(t1, W / 2, H / 2 - 10);
+  ctx.font = '16px monospace'; ctx.fillText(t2, W / 2, H / 2 + 22); ctx.textAlign = 'left';
+}
+const GO_BTNS = { retry: { x: 140, y: 440, w: 200, h: 52 }, menu: { x: 140, y: 505, w: 200, h: 44 } };
+function renderGameOver() {
+  const s = lastSummary || { score: 0, wave: 1, coins: 0, best: 0, time: 0 };
+  ctx.fillStyle = 'rgba(0,10,0,0.85)'; ctx.fillRect(40, 180, 400, 390);
+  ctx.strokeStyle = '#0f0'; ctx.lineWidth = 2; ctx.strokeRect(40, 180, 400, 390);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#f44'; ctx.font = 'bold 30px monospace'; ctx.fillText('RUN OVER', W / 2, 225);
+  ctx.fillStyle = '#0f0'; ctx.font = '18px monospace';
+  ctx.fillText('Score: ' + s.score + (s.score >= s.best && s.score > 0 ? '  NEW BEST!' : ''), W / 2, 270);
+  ctx.fillText('Wave reached: ' + s.wave, W / 2, 300);
+  ctx.fillText('Coins earned: ' + s.coins + '  (bank ' + coins + ')', W / 2, 330);
+  ctx.fillText('Time: ' + s.time + 's   Best: ' + s.best, W / 2, 360);
+  ctx.font = '13px monospace';
+  ctx.fillText('Energy ' + energy + '/' + MAX_ENERGY + (energy < MAX_ENERGY ? '  (+1 in ' + energyEta() + ')' : ''), W / 2, 395);
+  const r = GO_BTNS.retry, m = GO_BTNS.menu;
+  ctx.fillStyle = energy > 0 ? '#030' : '#222'; ctx.fillRect(r.x, r.y, r.w, r.h); ctx.strokeRect(r.x, r.y, r.w, r.h);
+  ctx.fillStyle = '#0f0'; ctx.font = 'bold 20px monospace'; ctx.fillText(energy > 0 ? 'RETRY (1 Energy)' : 'No Energy', W / 2, r.y + 33);
+  ctx.fillStyle = '#030'; ctx.fillRect(m.x, m.y, m.w, m.h); ctx.strokeRect(m.x, m.y, m.w, m.h);
+  ctx.fillStyle = '#0f0'; ctx.font = '16px monospace'; ctx.fillText('Menu / Upgrades', W / 2, m.y + 28);
+  ctx.textAlign = 'left';
+}
+function renderIdle() {
+  ctx.textAlign = 'center'; ctx.fillStyle = '#0f0';
+  ctx.font = 'bold 32px monospace'; ctx.fillText('FORMATION RAPTOR', W / 2, 300);
+  ctx.font = '18px monospace';
+  ctx.fillText(energy > 0 ? 'Tap here to start a run' : 'No energy, +1 in ' + energyEta(), W / 2, 360);
+  ctx.font = '13px monospace';
+  ctx.fillText('Energy ' + energy + '/' + MAX_ENERGY + '   Coins ' + coins, W / 2, 395);
+  ctx.fillText('Drag anywhere to fly. Auto-fire is always on.', W / 2, 425);
+  if (banner && banner.t > 0) { ctx.fillStyle = '#ff0'; ctx.fillText(banner.text, W / 2, 460); banner.t--; }
+  ctx.textAlign = 'left';
+}
+
+function frame(ts) {
+  if (state === 'running' && !picking && !paused) update(ts);
+  render();
+  requestAnimationFrame(frame);
+}
+
+// ===================== Input =====================
+document.addEventListener('keydown', e => { keys[e.key] = true; if (e.key === 'p' || e.key === 'Escape') togglePause(); });
 document.addEventListener('keyup', e => { keys[e.key] = false; });
 
 // Convert client coords -> canvas coords, accounting for the border and
@@ -836,65 +803,61 @@ function getCanvasTouch(e) {
   const boxW = canvas.clientWidth, boxH = canvas.clientHeight;
   const boxL = rect.left + canvas.clientLeft, boxT = rect.top + canvas.clientTop;
   const scale = Math.min(boxW / canvas.width, boxH / canvas.height);
-  const drawW = canvas.width * scale, drawH = canvas.height * scale;
-  const offX = (boxW - drawW) / 2, offY = (boxH - drawH) / 2;
+  const offX = (boxW - canvas.width * scale) / 2, offY = (boxH - canvas.height * scale) / 2;
   const t = e.touches ? e.touches[0] : e;
-  return {
-    x: (t.clientX - boxL - offX) / scale,
-    y: (t.clientY - boxT - offY) / scale
-  };
+  return { x: (t.clientX - boxL - offX) / scale, y: (t.clientY - boxT - offY) / scale };
 }
-
+function inBtn(p, b) { return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h; }
+// Returns true if the tap was consumed by an in-canvas screen (game over / idle / pause)
+function canvasTap(p) {
+  if (state === 'gameover') {
+    if (inBtn(p, GO_BTNS.retry)) { state = 'idle'; startRun(); if (!running) state = 'gameover'; }
+    else if (inBtn(p, GO_BTNS.menu)) backToMenu();
+    return true;
+  }
+  if (state === 'idle') { startRun(); return true; }
+  if (paused && !document.getElementById('upgrades').style.display.includes('block')) { paused = false; return true; }
+  return false;
+}
 function beginDrag(e) {
   const p = getCanvasTouch(e);
+  if (canvasTap(p)) return;
   touchX = p.x; touchY = p.y;
   drag = { fx: p.x, fy: p.y, px: player.x, py: player.y };
 }
-function moveDrag(e) {
-  const p = getCanvasTouch(e);
-  touchX = p.x; touchY = p.y;
-}
+function moveDrag(e) { if (!drag) return; const p = getCanvasTouch(e); touchX = p.x; touchY = p.y; }
 function endDrag() { touchX = null; touchY = null; drag = null; }
 
-// Touch: relative drag (ship moves by finger delta, not snapped under finger)
-canvas.addEventListener('touchstart', e => { e.preventDefault(); if (e.touches.length) beginDrag(e); }, { passive: false });
+canvas.addEventListener('touchstart', e => { e.preventDefault(); if (e.touches.length === 1) beginDrag(e); }, { passive: false });
 canvas.addEventListener('touchmove', e => { e.preventDefault(); if (e.touches.length) moveDrag(e); }, { passive: false });
-canvas.addEventListener('touchend', e => { e.preventDefault(); if (!e.touches.length) endDrag(); else beginDrag(e); }, { passive: false });
+canvas.addEventListener('touchend', e => { e.preventDefault(); if (!e.touches.length) endDrag(); }, { passive: false });
 canvas.addEventListener('touchcancel', endDrag, { passive: false });
-// Block page scroll / pinch-zoom / double-tap zoom outside buttons
+// Block page scroll / pinch-zoom
 document.addEventListener('touchmove', e => { if (e.target === canvas || e.touches.length > 1) e.preventDefault(); }, { passive: false });
 document.addEventListener('gesturestart', e => e.preventDefault());
-
 canvas.addEventListener('mousedown', beginDrag);
 canvas.addEventListener('mousemove', e => { if (e.buttons && drag) moveDrag(e); });
 window.addEventListener('mouseup', endDrag);
+// Auto-pause + save when the app is backgrounded
+document.addEventListener('visibilitychange', () => { if (document.hidden) { if (state === 'running' && !picking) paused = true; persist(); } });
 
+// ===================== Boot =====================
+tickEnergy();
 updateUI();
 updateHomeScores();
 updateDroneUI();
-// Force landing visible on load
 document.getElementById('landing').style.display = 'flex';
 document.getElementById('uiPanel').style.display = 'none';
-
-// Reliable Enter button handler
 const enterBtn = document.getElementById('enterBtn');
-if (enterBtn) {
-  enterBtn.addEventListener('click', enterGame);
-  enterBtn.addEventListener('touchend', function(e) { e.preventDefault(); enterGame(); }, { passive: false });
-}
-
-// Landing "Start Run" button
+enterBtn.addEventListener('touchend', function(e) { e.preventDefault(); enterGame(); }, { passive: false });
 const landingStartBtn = document.getElementById('landingStartBtn');
 landingStartBtn.addEventListener('click', startFromLanding);
 landingStartBtn.addEventListener('touchend', function(e) { e.preventDefault(); startFromLanding(); }, { passive: false });
-
-requestAnimationFrame(gameLoop);
-
-// Extra touch support for Start button on mobile
-document.getElementById('startBtn').addEventListener('touchend', function(e) {
-  e.preventDefault();
-  startRun();
-}, { passive: false });
+document.getElementById('startBtn').addEventListener('touchend', function(e) { e.preventDefault(); startRun(); }, { passive: false });
+setInterval(tickEnergy, 1000);
+// Test/debug hook (harmless in production)
+window.FR = { get state() { return state; }, get boss() { return boss; }, get enemies() { return enemies; }, get enemyBullets() { return enemyBullets; }, get player() { return player; }, get wave() { return wave; } };
+requestAnimationFrame(frame);
 </script>
 </body>
 </html>
