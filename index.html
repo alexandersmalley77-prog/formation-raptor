@@ -192,12 +192,6 @@ function upgradeDrone() {
     updateDroneUI();
   }
 }
-  const panel = document.getElementById('uiPanel');
-  const lb = document.getElementById('leaderboard');
-  const open = panel.style.display !== 'none';
-  panel.style.display = open ? 'none' : 'block';
-  if (lb) lb.style.display = open ? 'none' : 'block';
-}
 
 function enterGame() {
   document.getElementById('landing').style.display = 'none';
