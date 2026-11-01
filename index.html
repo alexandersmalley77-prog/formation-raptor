@@ -11,7 +11,11 @@ canvas { display:block; position:absolute; top:0; left:0; background:#001122; bo
 #uiPanel { display:none; }
 button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1px solid #0f0; cursor:pointer; font-size:13px; touch-action:manipulation; position:relative; z-index:101; }
 #landing { position:absolute; top:0; left:0; width:100vw; height:100vh; background:#001122; z-index:200; display:flex; flex-direction:column; align-items:center; justify-content:center; }
-#cube { width:60px; height:60px; background:#0af; animation:spin 2s linear infinite; margin-bottom:20px; }
+#droneGraphic { width:80px; height:50px; position:relative; margin-bottom:20px; }
+#droneBody { width:50px; height:20px; background:#0af; position:absolute; top:15px; left:15px; border-radius:4px; }
+#droneWingL { width:20px; height:8px; background:#0ff; position:absolute; top:8px; left:0; border-radius:2px; }
+#droneWingR { width:20px; height:8px; background:#0ff; position:absolute; top:8px; right:0; border-radius:2px; }
+#droneProp { width:12px; height:12px; background:#ff0; border-radius:50%; position:absolute; top:0; left:34px; animation:spin 0.5s linear infinite; }
 @keyframes spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
 #landing button { font-size:16px; padding:10px 20px; }
 #touchHint { position:absolute; bottom:4px; left:50%; transform:translateX(-50%); color:#0f0; font-size:8px; text-align:center; }
@@ -33,9 +37,15 @@ button { margin:2px; padding:6px 10px; background:#003300; color:#0f0; border:1p
 </head>
 <body>
 <div id="landing">
-  <div id="cube"></div>
+  <div id="droneGraphic">
+    <div id="droneProp"></div>
+    <div id="droneWingL"></div>
+    <div id="droneWingR"></div>
+    <div id="droneBody"></div>
+  </div>
   <div style="font-size:18px; margin-bottom:15px;">Formation Raptor</div>
   <button onclick="enterGame()">Enter</button>
+  <button onclick="toggleDrones()">Drones</button>
 </div>
 <div id="ui">
   <button onclick="toggleUI()">☰ Options</button>
@@ -189,6 +199,7 @@ function upgradeDrone() {
 function enterGame() {
   document.getElementById('landing').style.display = 'none';
   document.getElementById('uiPanel').style.display = 'block';
+  document.getElementById('leaderboard').style.display = 'block';
 }
 
 function toggleUI() {
